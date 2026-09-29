@@ -18,7 +18,7 @@ The [method and formula guide](docs/README.md) links to more detailed documentat
 
 ## Required input data
 
-The raw spreadsheets are **not included** in this public repository. Place authorized copies in `data/raw/` before running the app:
+The original competition spreadsheets are **not included** in this public repository. Place authorized copies in `data/raw/` before running the app:
 
 | File | Role in the prototype |
 | --- | --- |
@@ -26,16 +26,20 @@ The raw spreadsheets are **not included** in this public repository. Place autho
 | `神券订单数据样例.xlsx` | Order values and candidate coupons used to fit customer distributions. |
 | `用户行为序列.xlsx` | Structural information for the view-to-purchase funnel; not a basis for estimating individual causal effects. |
 
-The app also lets you choose another raw-data directory in its sidebar. Without these three files, a fresh clone cannot reproduce the data-backed simulation. Keep personal or commercial data out of Git; `data/` is ignored by [`.gitignore`](.gitignore).
+The app also lets you choose another raw-data directory in its sidebar. Keep personal or commercial data out of Git; `data/` is ignored by [`.gitignore`](.gitignore).
+
+For a public smoke test, `generate_synthetic_demo.py` creates deterministic, entirely invented files with the same input contract. The resulting numbers demonstrate code paths only and must not be used as evidence for the competition result. The existing figures under `pic/` are historical project artifacts, not outputs from this synthetic fixture.
 
 ## Run locally
 
-From the repository root, after supplying the input files:
+From the repository root:
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
+python generate_synthetic_demo.py  # omit when using authorized inputs
+python -m unittest discover -s tests -v
 streamlit run app.py
 ```
 
