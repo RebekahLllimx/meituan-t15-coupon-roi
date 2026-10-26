@@ -1,204 +1,49 @@
-# 下午茶半合成仿真与策略优化系统
+# Afternoon Tea Coupon Allocation Simulator
 
-## 项目定位
+A semi-synthetic prototype for studying coupon allocation in an afternoon-tea ordering scenario. It uses order data to model customer heterogeneity, a small behavior-sequence sample to define a purchase funnel, and profile data to describe segments. A simulator then compares coupon policies under budget and coverage constraints.
 
-本项目不再把当前数据当作“可直接训练出真实因果关系的完整闭环样本”，而是将它视为：
+This repository is a **modeling and decision-support demonstration**. Its incremental GTV and ROI values are generated under stated assumptions; they are not observed business outcomes or experimentally identified causal effects.
 
-- 订单数据：用于拟合用户价值、活跃度、价格敏感度等连续分布
-- 行为序列：用于提供下午茶消费决策路径的结构先验
-- 用户画像：用于分层解释与生成用户时的辅助约束
+![System architecture](pic/system_architecture.png)
 
-系统的核心思想是：
+## Model at a glance
 
-> 用数据定义结构和约束，再在结构化环境中推导用户行为与补贴效果。
+1. [Feature engineering](feature_engineering.py) fits distributions for customer value (`V`), activity (`A`), and price sensitivity (`S`), then generates a semi-synthetic user pool.
+2. The [funnel simulator](simulation_engine.py) represents `view -> click -> cart -> purchase`. Coupons change the modeled purchase stage rather than all stages.
+3. The model discounts the simulated difference between coupon and no-coupon GTV by natural conversion. The code calls this quantity `delta_gtv_causal`, but it remains a **mechanism-based counterfactual estimate**, not a measured causal effect.
+4. The [optimizer](optimization.py) scores coupon choices with an uncertainty bonus and allocates them greedily subject to a budget and a per-coupon coverage cap. The policy is bandit-inspired; the repository does not demonstrate an online production experiment.
+5. The [Streamlit app](app.py) presents user generation, calibration, simulation, allocation, and sensitivity views. The [report pipeline](run_full_report_pipeline.py) runs the same research workflow for exported analyses.
 
-## 方法论总览
+The [method and formula guide](docs/README.md) links to more detailed documentation, currently in Chinese.
 
-当前版本采用的是“半合成仿真 + 因果校正 + Contextual Bandit 优化”的主线，而不是传统监督学习。
+## Required input data
 
-### 1. 数据角色重定义
+The raw spreadsheets are **not included** in this public repository. Place authorized copies in `data/raw/` before running the app:
 
-- `data/raw/神券订单数据样例.xlsx`
-  - 用于拟合 `V ~ LogNormal`、`A ~ Gamma`、`S ~ Beta`
-  - 同时提取候选券集合、时间场景修正、客单 uplift
-- `data/raw/用户行为序列.xlsx`
-  - 不用于统计拟合，不做 KNN 外推
-  - 仅用于提取 `view → click → cart → purchase` 的 Funnel 结构
-- `data/raw/用户画像表.xlsx`
-  - 用于解释用户层差异
-  - 用于生成虚拟用户时加入年龄、会员等级、客单价分层等辅助约束
+| File | Role in the prototype |
+| --- | --- |
+| `用户画像表.xlsx` | Profile fields for segment interpretation and synthetic-user constraints. |
+| `神券订单数据样例.xlsx` | Order values and candidate coupons used to fit customer distributions. |
+| `用户行为序列.xlsx` | Structural information for the view-to-purchase funnel; not a basis for estimating individual causal effects. |
 
-### 2. 半合成用户生成
+The app also lets you choose another raw-data directory in its sidebar. Without these three files, a fresh clone cannot reproduce the data-backed simulation. Keep personal or commercial data out of Git; `data/` is ignored by [`.gitignore`](.gitignore).
 
-系统从订单数据中学习三类连续异质性：
+## Run locally
 
-- 用户价值 `V`
-- 活跃度 `A`
-- 价格敏感度 `S`
-
-随后结合画像分层规则，从真实用户画像中有放回采样，生成 `500~2000` 个虚拟用户，构成可用于仿真与策略优化的用户池。
-
-### 3. Funnel 仿真
-
-下午茶购买过程被拆成三段：
-
-- `p1: view → click`
-- `p2: click → cart`
-- `p3: cart → purchase`
-
-其中：
-
-- `β = p1 * p2 * p3`
-- 优惠券只作用在最后一层 `p3`
-- 券增量采用机制函数：
-  - `δ = S * log(1 + coupon / V) * (1 - p3)`
-
-### 4. 因果校正
-
-系统不直接用“有券 GTV - 无券 GTV”作为优化目标，而是采用：
-
-- `ΔGTV_causal = (GTV1 - GTV0) * (1 - β)`
-
-含义是：自然转化率越高的用户，本来就更可能购买，因此补贴带来的增量会被折减。
-其中 `delta_gtv_causal` 在本项目中用于表示“自然转化折减后的反事实增量 GTV”，不应解释为严格识别的因果效应。
-
-### 5. 策略优化
-
-优化器使用的是轻量 Contextual Bandit 逻辑：
-
-- `state = (V, A, S)`
-- `action = coupon`
-- `reward = ΔGTV_causal`
-- `uncertainty = 1 / sqrt(1 + exposure)`
-- `value_ucb = value + α * uncertainty`
-
-在预算和单券型覆盖上限约束下，系统根据 `value_ucb / cost` 进行排序分配，并在多轮 epoch 中更新用户的后验敏感度参数。
-
-## 当前系统实现了什么
-
-已完成的关键能力包括：
-
-- 基于 `raw` 数据直接构建下午茶场景
-- 连续用户分布拟合与虚拟用户生成
-- Funnel 机制仿真
-- 因果增量 GTV 计算
-- Contextual Bandit + 预算约束优化
-- 敏感性分析
-- 面向答辩展示的黄黑主题图表
-
-## 暂未采用的旧方案
-
-当前版本已经明确删除或停用以下旧逻辑：
-
-- LLM 生成 `β`
-- 行为序列 KNN 扩展到订单用户
-- `δ = coupon_rate - β`
-- 基于少量序列样本直接拟合真实用户转化率
-- 单点转化模型 `P = β + δ`
-
-## 运行方式
-
-### 1. 安装依赖
+From the repository root, after supplying the input files:
 
 ```bash
-pip install -r requirements.txt
-```
-
-### 2. 准备数据
-
-将以下原始文件放在 `data/raw/` 目录：
-
-- `用户画像表.xlsx`
-- `神券订单数据样例.xlsx`
-- `用户行为序列.xlsx`
-
-### 3. 启动应用
-
-```bash
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
 streamlit run app.py
 ```
 
-## 页面流程
+The optional explanation service reads `BAILI_API_KEY` from the environment; see [`.env.example`](.env.example). It is not needed to understand or run the core simulation. For batch experiments and report exports, see the [pipeline guide](docs/README.md).
 
-应用内分为五步：
+## How to read the outputs
 
-1. 半合成用户生成
-2. 结构与校准
-3. Funnel 仿真
-4. Bandit 优化
-5. 敏感性分析
-
-## 项目结构
-
-```
-/usr_sandbox/
-├── app.py                    # 主应用文件，提供Streamlit界面
-├── feature_engineering.py    # 特征工程模块，负责数据处理和用户生成
-├── simulation_engine.py      # 仿真引擎，负责用户行为仿真
-├── optimization.py           # 优化模块，实现Contextual Bandit算法
-├── visualization.py          # 可视化模块，负责图表生成
-├── llm_explainer.py          # LLM解释器，提供策略解释
-├── run_full_report_pipeline.py # 完整报告生成流水线
-├── utils.py                  # 工具函数
-├── requirements.txt          # 依赖包列表
-├── README.md                 # 项目说明文档
-├── data/                     # 数据目录
-│   └── raw/                  # 原始数据
-│       ├── 用户画像表.xlsx        # 用户画像数据
-│       ├── 神券订单数据样例.xlsx    # 订单数据
-│       └── 用户行为序列.xlsx        # 用户行为序列数据
-├── docs/                     # 文档目录
-│   ├── 技术架构文档.md             # 技术架构详细文档
-│   ├── 券策略优化系统综合说明.md       # 系统综合说明文档
-│   ├── run_full_report_pipeline_介绍.md # 运行脚本使用说明
-│   ├── 方法公式文档.md             # 系统核心公式说明
-│   ├── 数据说明文档.md             # 数据结构和处理说明
-│   ├── 报告草稿.md                # 系统报告草稿
-│   ├── ChatGPT-数据扩充方法推荐.md    # 数据扩充方法建议
-│   ├── 说明.txt                  # 其他说明信息
-│   └── README.md                 # 文档目录说明
-├── .env.example              # 环境变量模板（真实 .env 已 gitignore）
-├── .gitignore                # Git忽略规则
-└── .venv/                    # 虚拟环境（已 gitignore）
-```
-
-### 核心文件说明
-
-| 文件 | 主要功能 |
-|------|----------|
-| app.py | 主应用入口，提供Streamlit界面，协调各模块工作 |
-| feature_engineering.py | 数据加载、场景提取、漏斗构建、用户生成 |
-| simulation_engine.py | 计算用户响应、GTV增量、ROI等指标 |
-| optimization.py | Contextual Bandit算法实现，券分配优化 |
-| visualization.py | 各类图表生成与展示 |
-| llm_explainer.py | 生成业务策略解释 |
-| run_full_report_pipeline.py | 自动化报告生成流水线，整合数据处理、仿真、优化和结果输出 |
-| utils.py | 工具函数，如数据加载等 |
-
-### 数据文件说明
-
-| 文件 | 作用 |
-|------|------|
-| 用户画像表.xlsx | 包含用户基本信息，用于分层解释和生成虚拟用户 |
-| 神券订单数据样例.xlsx | 用于拟合用户价值、活跃度、价格敏感度分布 |
-| 用户行为序列.xlsx | 用于提取漏斗结构，不用于统计拟合 |
-
-### 文档文件说明
-
-| 文件 | 作用 |
-|------|------|
-| 技术架构文档.md | 系统技术架构详细说明，介绍系统的整体架构、核心组件、数据流程和技术实现 |
-| 券策略优化系统综合说明.md | 系统综合说明文档，整合技术架构、数据描述、建模、评估和应用等全面内容 |
-| run_full_report_pipeline_介绍.md | 运行脚本使用说明，详细介绍run_full_report_pipeline.py的功能、实验设计和结果解读 |
-| 方法公式文档.md | 系统核心公式说明，从代码中提取的所有实际使用的公式，包括数学函数、特征计算、漏斗模型等 |
-| 数据说明文档.md | 数据结构和处理说明，详细描述原始数据的结构、字段含义和处理流程 |
-| 报告草稿.md | 系统报告草稿，系统分析报告的初步版本 |
-| ChatGPT-数据扩充方法推荐.md | 数据扩充方法建议，基于ChatGPT的数据分析和扩充方法推荐 |
-| 说明.txt | 其他说明信息，项目相关的补充说明 |
-| README.md | 文档目录说明，介绍docs文件夹中各个文件的功能 |
-
-## 适合在报告中如何表述
-
-建议统一使用下面这句作为方法论摘要：
-
-> 本文并不将原始数据视为可直接监督学习的完整闭环，而是将订单数据用于分布拟合、将行为序列用于决策结构提取、将画像数据用于异质性解释，并在此基础上构建半合成仿真环境，结合因果校正与 Contextual Bandit 完成预算约束下的发券策略优化。
+- Compare policies **within the same synthetic population, assumptions, budget, and coupon constraints**.
+- Treat the natural-conversion adjustment as a modeling heuristic. It does not replace randomized treatment and control data.
+- Treat sensitivity charts and any monthly business extrapolations as scenarios, not forecasts or measured savings.
+- Check the [technical documentation](docs/README.md) and source modules before reusing a formula or chart in a report.
