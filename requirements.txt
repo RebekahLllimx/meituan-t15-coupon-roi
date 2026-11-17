@@ -1,9 +1,5 @@
-streamlit
-pandas
 numpy
-scikit-learn
 openpyxl
-matplotlib
-requests
-python-dotenv
-tqdm
+pandas
+scikit-learn
+streamlit

@@ -168,7 +168,7 @@ class CouponBanditEnvironment:
 
     def action_context(self, user_index: int, action: Optional[str]) -> np.ndarray:
         user_context = self.context(user_index)
-        metadata = self.engine._parse_coupon_name(action)
+        metadata = self.engine.coupon_metadata(action)
         reference_value = max(1.0, float(self.engine.reference_means["value"]))
         action_features = np.array([
             float(metadata["coupon_value"]) / reference_value,
@@ -187,7 +187,11 @@ class CouponBanditEnvironment:
         return int(len(self.action_context(0, self.actions[0])))
 
     def coupon_value(self, action: Optional[str]) -> float:
-        return float(self.engine._parse_coupon_name(action)["coupon_value"])
+        return float(self.action_metadata(action)["coupon_value"])
+
+    def action_metadata(self, action: Optional[str]) -> Dict[str, float]:
+        """Expose normalized action properties without leaking simulator internals."""
+        return self.engine.coupon_metadata(action)
 
     def expected_reward(self, user_index: int, action: Optional[str]) -> float:
         user = self.users.iloc[int(user_index)]

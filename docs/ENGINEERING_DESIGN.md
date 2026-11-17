@@ -1,195 +1,119 @@
-# Engineering Design: Afternoon Tea Coupon Allocation Simulator
+# Engineering Design
 
-## 1. Problem and scope
+## 1. Problem and requirements
 
-The project explores a constrained allocation question: given a fixed coupon
-budget and incomplete historical data, how can candidate policies be compared
-without presenting simulated outcomes as production evidence?
-
-The intended users are analysts and competition reviewers. The application is
-an interactive research prototype, not a production promotion service. It does
-not identify causal treatment effects, learn from live traffic, or issue real
-coupons.
+The project asks whether a coupon policy can learn different actions for different users while respecting a campaign budget. It is designed for reviewers and analysts who want an inspectable contextual-bandit example, not for issuing real coupons.
 
 ### Functional requirements
 
-- load three authorized input tables or deterministic synthetic fixtures;
-- construct a semi-synthetic population while preserving documented marginal
-  distributions and segment constraints;
-- simulate a view-to-purchase funnel with and without a coupon;
-- allocate at most one coupon per user under budget and coverage constraints;
-- compare the allocation with no-coupon and same-budget uniform baselines;
-- export inspectable metrics and sensitivity analyses.
+- adapt the three competition-style spreadsheet schemas without publishing private inputs;
+- build a reproducible semi-synthetic user population;
+- expose a finite action set containing no coupon and candidate coupons;
+- select one feasible action per update and reveal only its stochastic outcome;
+- update a contextual policy from selected-action feedback;
+- record reward, expected regret, action mix, coupon cost, and remaining budget;
+- reproduce results from fixed configurations and seeds.
 
 ### Non-functional requirements
 
-- deterministic runs when the same seed and configuration are used;
-- explicit separation between simulated metrics and observed business results;
-- no raw or derived private data in Git;
-- framework-neutral optimization code that can run without Streamlit;
-- validation of allocation constraints and malformed inputs.
+- deterministic fixture generation and seeded experiments;
+- explicit separation of simulator results from observed business outcomes;
+- domain code independent of Streamlit;
+- input validation, budget safety, and automated tests;
+- no credentials, private data, generated reports, or local caches in Git.
 
-## 2. Architecture
+## 2. System architecture
 
 ```text
-authorized spreadsheets / synthetic fixture
-                    |
-                    v
-          FeatureEngineering
-                    |
-       users + model configuration
-                    |
-          SimulationEngine
-      user-coupon expected outcomes
-                    |
-              Optimization
-   UCB-style score + constrained greedy allocation
-                    |
-      result object + fair policy baselines
-          /                         \
-     Streamlit UI             batch report pipeline
+Synthetic fixture / authorized local spreadsheets
+                       │
+                       ▼
+              FeatureEngineering
+          schema adapter + distribution fit
+                       │
+             users + environment parameters
+                       │
+                       ▼
+               SimulationEngine
+      funnel probabilities + coupon response
+                       │
+                       ▼
+              CouponBanditEnvironment
+   context/action features + partial stochastic feedback
+                       │
+                       ▼
+                  SharedLinUCB
+      action selection + online parameter update
+                 /                 \
+                ▼                   ▼
+          Streamlit UI        benchmark CLI
 ```
 
-`feature_engineering.py` owns input parsing, distribution fitting, and
-semi-synthetic population construction. `simulation_engine.py` owns funnel and
-accounting assumptions. `optimization.py` owns scoring and allocation and emits
-framework-neutral progress events. `app.py` renders the interactive workflow;
-it is not part of the optimization domain layer.
+`feature_engineering.py` is the input adapter. `simulation_engine.py` owns outcome assumptions. `contextual_bandit.py` owns the environment-policy boundary and learning loop. `app.py` renders results but contains no policy logic. The command-line scripts provide small and full benchmark entry points.
 
-## 3. Interfaces and data contracts
+## 3. Interfaces and data design
 
-The optimizer requires one row per `user_id` and the state fields `V`, `A`,
-`S_alpha_post`, `S_beta_post`, `exposure`, `successes`, and `failures`. It rejects
-duplicate identifiers, missing columns, invalid coverage shares, negative UCB
-weights, negative budgets, and empty coupon catalogs.
+The generated user table contains one unique `user_id` and the state required by the simulator: expected basket value (`V`), activity (`A`), posterior sensitivity parameters, and exposure/success counts. Duplicate identifiers and empty populations are rejected.
 
-The result object contains the final allocation, selected user-coupon rows,
-strategy metrics, coupon usage, allocation history, and explicit constraint
-values. Each user can receive at most one coupon. Total modeled cost must not
-exceed the budget, and each coupon is capped at a configured share of users.
+The action catalog contains a no-coupon action plus coupon metadata: face value, free/paid indicator, expanded-value indicator, basket uplift assumption, and attraction factor. Source-language coupon names remain an adapter detail; the UI translates them into English labels.
 
-The legacy internal key `delta_gtv_causal` denotes a model-adjusted incremental
-GTV value. It is retained temporarily for compatibility with historical reports;
-it is **not** a causal estimate. New prose and UI labels use “model-adjusted
-incremental GTV.”
+For shared LinUCB, the feature vector combines:
 
-## 4. Core mechanism and technical decisions
+- an intercept and standardized user value, activity, and sensitivity;
+- quadratic and pairwise user terms for nonlinear thresholds;
+- coupon properties;
+- user-property interactions that permit personalized action response.
 
-The simulator transforms user value, activity, sensitivity, time-of-day, and
-coupon metadata into funnel probabilities. It compares modeled GTV under a
-coupon with the no-coupon counterfactual and applies a documented natural-
-conversion discount. This is a heuristic inside the simulation, not causal
-identification from treatment and control observations.
+Each `BanditStep` records only the chosen action's realized reward, cost, and purchase rate, plus expected values used for evaluation. Oracle expected rewards are never provided to the policy update.
 
-The optimizer precomputes user-coupon outcomes, adds an uncertainty bonus, and
-ranks feasible pairs by adjusted value per unit cost. A greedy pass enforces the
-budget, one-coupon-per-user rule, and per-coupon coverage cap. Repeated rounds
-update synthetic beliefs using model-implied responses. For that reason the
-method is described as **iterative UCB-style allocation**, not an online
-contextual bandit.
+## 4. Implementation decisions
 
-The same-budget uniform baselines are intentional: comparing a constrained
-policy with an unconstrained full-population policy would confound policy quality
-with budget and exposure differences.
+### Partial feedback
 
-### Sequential contextual-bandit experiment
+At each update, a user is sampled, the policy scores feasible actions, and the environment returns stochastic feedback only for the selected action. The maintained shared model transfers information across coupon actions; the disjoint implementation is retained as a diagnostic baseline.
 
-`contextual_bandit.py` is deliberately separate from the full-information
-allocator. The maintained policy uses one shared LinUCB model over user context,
-coupon properties, and their interactions; a disjoint implementation remains as
-a diagnostic baseline. At each step the policy selects one feasible action,
-observes only that action's batched stochastic purchase, GTV, and coupon cost,
-and updates from that selected-action feedback.
+### Incremental reward
 
-The environment and learner have separate responsibilities. The environment may
-compute expected rewards for evaluation and oracle regret, but those values are
-not passed to the policy update. Budget feasibility is checked before selection,
-and realized coupon cost is deducted only after a simulated purchase. This is a
-real partial-feedback contextual-bandit loop evaluated in simulation, not a
-claim that the competition tables contain logged online-bandit feedback.
+The raw selected-action reward is simulated coupon GTV minus `0.25 × coupon cost`. An action-independent expected no-coupon GTV is subtracted as a control variate. This reduces variance and focuses the learner on incremental value without revealing another coupon's realized outcome.
+
+### Numerical update
+
+LinUCB uses ridge regularization and a Sherman–Morrison rank-one inverse update. This avoids recomputing a matrix inverse after every observation. Monetary rewards are scaled before learning so that confidence bounds remain numerically meaningful; unscaled values are retained in the history.
+
+### Personalization scenario
+
+The source tables do not identify individual treatment effects. The simulator therefore declares a scenario assumption: response is strongest when coupon value as a fraction of basket value is near a sensitivity-dependent target. Rare-coupon uplift is shrunk toward an amount-based prior using reliability weight `n / (n + 30)`. Both choices are modeling assumptions, not recovered causal relationships.
+
+### Budget handling
+
+An action is feasible only when its face value does not exceed remaining budget. Realized coupon cost is deducted only when a simulated purchase occurs. The loop therefore cannot spend more than the supplied budget.
 
 ## 5. Testing and validation
 
-The public suite uses deterministic invented spreadsheets. It checks:
+The test suite checks:
 
-- fixture generation and reproducibility;
-- end-to-end feature construction, simulation, and allocation;
-- budget, uniqueness, and coupon-coverage constraints;
-- zero-budget behavior;
-- progress reporting without importing Streamlit;
-- rejection of malformed optimizer inputs;
-- cache identifier validation against path traversal;
-- partial-feedback LinUCB updates, seeded stochastic outcomes, budget safety,
-  and non-negative expected regret.
+- deterministic fixture generation and successful schema adaptation;
+- finite simulator outputs and multiple context-dependent optimal actions;
+- selected-action-only policy updates;
+- the incremental inverse against a direct matrix inverse;
+- seeded stochastic reproducibility;
+- non-negative expected regret and budget safety;
+- invalid configuration and malformed population rejection.
 
-The suite does not prove that the behavioral assumptions hold in production.
-Sensitivity analysis and Monte Carlo runs inspect model behavior; a randomized
-online experiment would be required to estimate real incremental impact.
+The benchmark compares random action, best fixed action, contextual oracle, and learned shared LinUCB under one environment and protocol. This validates code behavior inside the simulator; it does not validate the behavioral assumptions against production traffic.
 
-## 6. Security, privacy, and operations
+## 6. Deployment and operations
 
-Raw data, exports, local environments, logs, and result caches are ignored by
-Git. The optional explanation service reads its credential from the environment
-and is not required for the core workflow. Because it sends selected records to
-an external provider, it must not be enabled with personal or commercially
-sensitive fields without authorization and minimization.
+The project is intentionally a local research application. Installation is defined by `requirements.txt`; tests run in GitHub Actions; Streamlit provides the demonstration page. No database, microservice, external LLM, or cloud deployment is added without an operational requirement.
 
-The local result cache uses pickle to retain DataFrames. Run identifiers are
-validated to prevent path traversal, but pickle remains unsafe for untrusted
-artifacts. Only artifacts created by the local application may be loaded.
+Raw data, exports, logs, virtual environments, and editor artifacts are excluded by `.gitignore`. The public demo generates its own temporary input files and deletes them after feature construction.
 
-## 7. Limitations and next decisions
+## 7. Limitations and next steps
 
-- The population and outcomes are semi-synthetic; reported ROI and GTV values
-  are scenarios rather than observed gains.
-- Repeated UCB-style rounds do not consume live feedback. A real online-learning
-  production extension would need a deployed observation stream. The separate
-  LinUCB experiment now supplies a valid simulated learning loop, but does not
-  remove this production-data limitation.
+- Public results are semi-synthetic and are not evidence of campaign lift.
+- The simulator oracle is available only for evaluation; a production system cannot query it.
+- Source tables lack randomized assignments and logging propensities, so they cannot support unbiased offline policy evaluation.
+- Production use would require controlled exploration, propensity logging, delayed-outcome handling, safety constraints, drift monitoring, and IPS or doubly robust evaluation.
+- A feature/schema version should be introduced before stored models or cross-version result comparison are supported.
 
-### Why a contextual bandit is conditionally appropriate
-
-The competition question combines repeated user contexts, a finite action set,
-immediate coupon outcomes, and a budget. This matches contextual bandits only if
-the system can observe action–outcome feedback after deployment. The supplied
-tables do not contain a usable logging propensity and unified treatment/outcome
-record, so they cannot support unbiased offline policy evaluation. The current
-experiment is therefore a simulator study, not an offline estimate of Meituan
-policy value.
-
-The raw group-mean uplift for rare coupons was also unstable and confounded by
-user mix. Coupon uplift is now shrunk toward an amount-based prior with weight
-`n / (n + 30)`. The bandit environment adds an explicit, switchable scenario
-assumption: response is highest when coupon value as a fraction of basket value
-is near a sensitivity-dependent target. This creates a transparent personalized
-decision problem; it is not claimed as a relationship identified from the source
-tables.
-
-The maintained policy uses shared LinUCB features for user variables, coupon
-properties, and their interactions. Feedback is aggregated over 16 simulated
-exposures per update to represent batched campaign telemetry. A control variate
-subtracts action-independent no-coupon expected GTV, so the reward targets
-incremental value rather than learning which users naturally spend more.
-
-The reproducible benchmark uses 500 users, 20,000 updates, a 1,000-update
-reporting window, three seeds, `alpha=0.25`, and a 120,000 simulated budget. In
-the reviewed fixture, the best fixed action has expected incremental net reward
-1.0688 and the contextual oracle 1.2560. The three final-window LinUCB rewards
-are 1.2146, 1.2137, and 1.2111; final-window regrets are 0.0467, 0.0454, and
-0.0548. Thus the learned policy captures roughly 96% of the simulator oracle and
-exceeds the best fixed action by about 13%, within this declared scenario only.
-
-Method references: Li et al., *A Contextual-Bandit Approach to Personalized News
-Article Recommendation* (WWW 2010), and Chu et al., *Contextual Bandits with
-Linear Payoff Functions* (AISTATS 2011). Logged production evaluation would
-require propensities and methods such as IPS or doubly robust evaluation rather
-than this simulator oracle.
-- The historical metric key should eventually be migrated to a neutral name
-  across reports and visualizations, with a versioned result schema.
-- `app.py` still performs substantial orchestration. A future application service
-  can produce a typed result object shared by the UI and batch pipeline.
-- Cache artifacts need a schema/version field before long-term compatibility can
-  be promised.
-
-These limitations are preferred to adding microservices or cloud deployment
-without a demonstrated operational need.
+The current design favors a narrow, testable learning system over decorative microservices or unsupported scalability claims.

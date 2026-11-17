@@ -61,7 +61,8 @@ class SimulationEngine:
         self.p2_intercept = _safe_logit(self.funnel['p2'])
         self.p3_intercept = _safe_logit(self.funnel['p3'])
 
-    def _parse_coupon_name(self, coupon):
+    def coupon_metadata(self, coupon):
+        """Return normalized coupon properties for one source-schema label."""
         if coupon in self.coupon_catalog:
             return self.coupon_catalog[coupon]
 
@@ -147,7 +148,7 @@ class SimulationEngine:
         }
 
     def funnel_response(self, user, coupon=None, time_slot="15:00", sample_bayesian=False, rng=None):
-        coupon_meta = self._parse_coupon_name(coupon)
+        coupon_meta = self.coupon_metadata(coupon)
         V = float(user['V'])
         A = float(user['A'])
         S = self._posterior_sensitivity(user, sample=sample_bayesian, rng=rng)
@@ -202,7 +203,8 @@ class SimulationEngine:
         gtv_no_coupon = prob_no_coupon * V
         gtv_with_coupon = prob_with_coupon * (effective_V + uplift)
         delta_gtv = gtv_with_coupon - gtv_no_coupon
-        # delta_gtv_causal: 自然转化折减后的反事实增量 GTV（非严格因果识别量）
+        # Historical compatibility key: model-adjusted incremental GTV after
+        # discounting natural conversion. This is not a causal estimate.
         causal_discount_weight = compute_causal_discount(
             beta=beta,
             mode=self.causal_discount_mode,

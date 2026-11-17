@@ -49,7 +49,7 @@ class FeatureEngineering:
         self.use_auto_distribution_selector = True
 
     def load_data(self, data_dir):
-        """加载 raw 数据。"""
+        """Load the three source-schema spreadsheets from a directory."""
         candidate_dir = data_dir
         if os.path.isdir(os.path.join(data_dir, 'raw')):
             candidate_dir = os.path.join(data_dir, 'raw')
@@ -61,12 +61,15 @@ class FeatureEngineering:
         if self.user_profile is None or self.order_df is None or self.behavior_seq is None:
             return False
 
-        logger.info("raw 数据加载成功: 用户%d, 订单%d, 行为%d", len(self.user_profile), len(self.order_df), len(self.behavior_seq))
+        logger.info(
+            "Loaded source-schema data: %d profiles, %d orders, %d behavior rows",
+            len(self.user_profile), len(self.order_df), len(self.behavior_seq),
+        )
         return True
 
     def build_features_and_params(self, n_users=1000, random_state=42, use_auto_distribution_selector=True):
-        """主入口：基于 raw 数据构建半合成用户池与场景参数。"""
-        logger.info("开始构建半合成仿真模型")
+        """Build the semi-synthetic population and environment parameters."""
+        logger.info("Building the semi-synthetic environment")
         self.use_auto_distribution_selector = bool(use_auto_distribution_selector)
         self.scene_constraints = self._build_scene_constraints()
         self.scene_orders = self._extract_scene_orders()
@@ -76,7 +79,7 @@ class FeatureEngineering:
         self.generated_users = self.generate_users(n=n_users, random_state=random_state)
         self.calibration = self._build_calibration_snapshot(self.generated_users)
         self.global_params['calibration'] = self.calibration
-        logger.info("半合成仿真模型构建完成，生成用户数=%d", len(self.generated_users))
+        logger.info("Built a semi-synthetic population with %d users", len(self.generated_users))
         return self.generated_users, self.global_params
 
     def _build_scene_constraints(self):
@@ -112,7 +115,10 @@ class FeatureEngineering:
         exclude_poi_mask = orders['POI分类'].astype(str).str.contains('|'.join(self.scene_constraints['exclude_poi_keywords']), na=False)
         amount_mask = orders['订单金额'].between(5, 120, inclusive='both')
         scene_orders = orders[afternoon_mask & (bu_mask | poi_mask) & (~exclude_bu_mask) & (~exclude_poi_mask) & amount_mask].copy()
-        logger.info("下午茶场景订单=%d，场景用户=%d", len(scene_orders), scene_orders['user_id'].nunique())
+        logger.info(
+            "Filtered %d afternoon-tea orders across %d users",
+            len(scene_orders), scene_orders['user_id'].nunique(),
+        )
         return scene_orders
 
     def _parse_behavior_timestamp(self, value):
@@ -189,7 +195,7 @@ class FeatureEngineering:
 
         hesitation = float(np.mean(hesitation_values)) if hesitation_values else 0.0
         impulse = float(np.mean(impulse_flags)) if impulse_flags else 0.25
-        logger.info("Funnel结构提取完成: p1=%.3f p2=%.3f p3=%.3f", funnel['p1'], funnel['p2'], funnel['p3'])
+        logger.info("Extracted funnel: p1=%.3f p2=%.3f p3=%.3f", funnel['p1'], funnel['p2'], funnel['p3'])
         return {
             'p1': funnel['p1'],
             'p2': funnel['p2'],
@@ -491,7 +497,7 @@ class FeatureEngineering:
                 stability = self._bootstrap_stability(values, builder, rng) if spec['generator'] != 'empirical' else {'stable': True, 'param_cv': 0.0}
                 evaluations.append((name, spec, quality, stability))
             except Exception as exc:
-                logger.warning("%s 分布选择失败: %s", variable_name, exc)
+                logger.warning("Distribution selection failed for %s: %s", variable_name, exc)
 
         accepted = [
             (name, spec, quality, stability)
@@ -688,7 +694,7 @@ class FeatureEngineering:
         }
 
     def generate_users(self, n=1000, random_state=42):
-        """基于 V/A/S 分布和画像辅助构造连续用户。"""
+        """Generate users from the V/A/S distributions and profile constraints."""
         rng = np.random.default_rng(random_state)
         profiles = self.user_profile.sample(n=n, replace=True, random_state=random_state).reset_index(drop=True)
         users = []

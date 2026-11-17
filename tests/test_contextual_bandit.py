@@ -23,14 +23,14 @@ def build_fixture(seed=21, n_users=24):
 
 class ContextualBanditTest(unittest.TestCase):
     def test_policy_updates_only_selected_action(self):
-        policy = DisjointLinUCB([None, "5元券"], context_dim=2, alpha=0.2)
+        policy = DisjointLinUCB([None, "CNY5"], context_dim=2, alpha=0.2)
         context = np.array([1.0, 0.5])
-        policy.update(context, "5元券", reward=3.0)
-        self.assertEqual(policy.observations["5元券"], 1)
+        policy.update(context, "CNY5", reward=3.0)
+        self.assertEqual(policy.observations["CNY5"], 1)
         self.assertEqual(policy.observations[None], 0)
         np.testing.assert_allclose(
-            policy._a_inverse["5元券"],
-            np.linalg.inv(policy._a["5元券"]),
+            policy._a_inverse["CNY5"],
+            np.linalg.inv(policy._a["CNY5"]),
             rtol=1e-10,
             atol=1e-10,
         )
@@ -83,6 +83,12 @@ class ContextualBanditTest(unittest.TestCase):
             self.assertGreater(len(optimal_actions), 1)
         finally:
             directory.cleanup()
+
+    def test_invalid_policy_configuration_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "invalid LinUCB configuration"):
+            SharedLinUCB(feature_dim=0)
+        with self.assertRaisesRegex(ValueError, "at least one action"):
+            DisjointLinUCB([], context_dim=2)
 
 
 if __name__ == "__main__":
