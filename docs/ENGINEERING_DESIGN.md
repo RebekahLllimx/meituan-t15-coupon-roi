@@ -1,8 +1,8 @@
-# Engineering Design
+# Engineering Design — Meituan T15 Coupon Strategy Project
 
 ## 1. Problem and requirements
 
-The project asks whether a coupon policy can learn different actions for different users while respecting a campaign budget. It is designed for reviewers and analysts who want an inspectable contextual-bandit example, not for issuing real coupons.
+This student competition project asks how afternoon-tea coupons can be simulated, compared, and allocated across heterogeneous users while respecting a campaign budget. Contextual learning is the current allocation method inside the broader Meituan T15 project. The application is a research and decision-support prototype rather than a production promotion service.
 
 ### Functional requirements
 
@@ -49,7 +49,7 @@ Synthetic fixture / authorized local spreadsheets
           Streamlit UI        benchmark CLI
 ```
 
-`feature_engineering.py` is the input adapter. `simulation_engine.py` owns outcome assumptions. `contextual_bandit.py` owns the environment-policy boundary and learning loop. `app.py` renders results but contains no policy logic. The command-line scripts provide small and full benchmark entry points.
+`feature_engineering.py` is the input adapter. `simulation_engine.py` owns outcome assumptions. `contextual_bandit.py` owns the environment-policy boundary and learning loop. `app.py` presents the competition problem, data calibration, model structure, policy results, decision explanations, and project evolution, but contains no policy logic. The command-line scripts provide small and full benchmark entry points.
 
 ## 3. Interfaces and data design
 
@@ -104,7 +104,7 @@ The benchmark compares random action, best fixed action, contextual oracle, and 
 
 ## 6. Deployment and operations
 
-The project is intentionally a local research application. Installation is defined by `requirements.txt`; tests run in GitHub Actions; Streamlit provides the demonstration page. No database, microservice, external LLM, or cloud deployment is added without an operational requirement.
+The project is intentionally a local competition and research application. Installation is defined by `requirements.txt`; tests run in GitHub Actions; Streamlit provides the demonstration page. No database, microservice, external LLM, or cloud deployment is added without an operational requirement. The former LLM strategy explainer was replaced by deterministic explanations derived from displayed inputs and metrics, preserving the useful business-translation layer without transmitting records or inventing reasons.
 
 Raw data, exports, logs, virtual environments, and editor artifacts are excluded by `.gitignore`. The public demo generates its own temporary input files and deletes them after feature construction.
 

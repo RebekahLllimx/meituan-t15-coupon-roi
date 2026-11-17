@@ -1,4 +1,4 @@
-"""Interactive demonstration of the maintained coupon-allocation experiment."""
+"""Interactive presentation of the maintained Meituan T15 competition project."""
 
 import tempfile
 
@@ -11,7 +11,7 @@ from feature_engineering import FeatureEngineering
 from generate_synthetic_demo import generate
 
 
-st.set_page_config(page_title="Contextual Coupon Allocation", page_icon="🎟️", layout="wide")
+st.set_page_config(page_title="Meituan T15 Coupon Strategy", page_icon="🎟️", layout="wide")
 
 
 @st.cache_data(show_spinner=False)
@@ -55,8 +55,25 @@ def display_action(action, environment: CouponBanditEnvironment) -> str:
     return f"CNY {metadata['coupon_value']:g} coupon{suffix}"
 
 
-st.title("Contextual Coupon Allocation")
-st.caption("A reproducible, semi-synthetic LinUCB experiment for budget-aware coupon decisions")
+def explain_decision(row: pd.Series, user: pd.Series, environment: CouponBanditEnvironment) -> str:
+    """Create an auditable business explanation from the values shown on screen."""
+    action_label = display_action(row["action"], environment)
+    sensitivity = float(user["S_alpha_post"] / (user["S_alpha_post"] + user["S_beta_post"]))
+    if row["action"] is None or pd.isna(row["action"]):
+        decision = "The policy kept the no-coupon action for this update"
+    else:
+        decision = f"The policy selected a {action_label} for this update"
+    return (
+        f"{decision}. The synthetic user has an expected basket value of CNY {user['V']:.1f}, "
+        f"activity {user['A']:.2f}, and estimated price sensitivity {sensitivity:.2f}. "
+        f"The selected action's modelled incremental net reward is {row['expected_reward']:.3f}; "
+        f"its gap to the simulator oracle is {row['expected_regret']:.3f}. The choice may include "
+        "exploration, so this explanation reports the policy inputs rather than inventing a causal reason."
+    )
+
+
+st.title("Meituan T15 Afternoon-Tea Coupon Strategy")
+st.caption("A maintained student competition project for coupon simulation, personalization, and budget-aware allocation")
 st.warning(
     "Research prototype only. All outcomes on this page are simulated under documented "
     "assumptions; they are not production Meituan results or causal-effect estimates."
@@ -65,10 +82,10 @@ st.warning(
 with st.sidebar:
     st.header("Experiment settings")
     n_users = st.slider("Synthetic users", 100, 1_000, 300, 100)
-    steps = st.slider("Learning updates", 1_000, 20_000, 3_000, 1_000)
+    steps = st.slider("Learning updates", 1_000, 20_000, 10_000, 1_000)
     feedback_batch = st.select_slider("Exposures per update", [1, 4, 8, 16, 32], value=16)
     alpha = st.slider("Exploration coefficient", 0.0, 1.0, 0.25, 0.05)
-    budget = st.number_input("Simulated budget (CNY)", 1_000.0, 200_000.0, 18_000.0, 1_000.0)
+    budget = st.number_input("Simulated budget (CNY)", 1_000.0, 200_000.0, 60_000.0, 1_000.0)
     seed = st.number_input("Random seed", min_value=0, max_value=10_000, value=42)
     run_requested = st.button("Run experiment", type="primary", width="stretch")
 
@@ -121,22 +138,30 @@ summary_columns[2].metric("Contextual oracle", f"{baselines['oracle']:.3f}")
 summary_columns[3].metric("Oracle captured", f"{oracle_capture:.1f}%")
 summary_columns[4].metric("Regret reduction", f"{regret_reduction:.1f}%")
 
-overview_tab, learning_tab, actions_tab, assumptions_tab = st.tabs(
-    ["Overview", "Learning curve", "Actions", "Assumptions"]
+overview_tab, data_tab, learning_tab, actions_tab, assumptions_tab = st.tabs(
+    ["Project", "Data & model", "Policy learning", "Decisions", "Evidence & evolution"]
 )
 
 with overview_tab:
-    st.subheader("What the experiment does")
+    st.subheader("Competition problem")
     st.write(
-        "The policy observes a user context, selects one feasible coupon action, and updates "
-        "a shared LinUCB model using only the selected action's simulated feedback. User and "
-        "coupon features share statistical strength, while a remaining-budget check prevents "
-        "infeasible choices."
+        "This project was developed for the Meituan T15 business-data-science competition. "
+        "It studies how afternoon-tea coupons can be allocated across heterogeneous users "
+        "under a limited subsidy budget when the supplied tables do not form a complete "
+        "context–treatment–outcome history."
     )
+    st.subheader("Current solution")
     st.code(
         "Synthetic spreadsheets → feature adapter → funnel simulator\n"
         "→ context-action features → LinUCB selection → partial feedback → update",
         language="text",
+    )
+    st.write(
+        "The original competition prototype established scene filtering, user-state modelling, "
+        "a purchase funnel, and constrained coupon comparison. The maintained version keeps "
+        "that business problem and adds a valid sequential learning loop: the policy observes "
+        "only the outcome of its selected action, shares evidence across coupon types, and "
+        "checks budget feasibility before every decision."
     )
     settings_frame = pd.DataFrame([settings]).rename(columns={
         "users": "Users",
@@ -147,6 +172,51 @@ with overview_tab:
         "seed": "Seed",
     })
     st.dataframe(settings_frame, hide_index=True, width="stretch")
+
+with data_tab:
+    st.subheader("Input structure and calibrated scenario")
+    calibration = parameters["calibration"]
+    data_columns = st.columns(4)
+    data_columns[0].metric("Filtered orders", f"{calibration['raw_scene_orders']:,}")
+    data_columns[1].metric("Source users", f"{calibration['raw_scene_users']:,}")
+    data_columns[2].metric("Average order value", f"CNY {calibration['raw_avg_order_value']:.2f}")
+    data_columns[3].metric("Coupon-order share", f"{100 * calibration['raw_coupon_rate']:.1f}%")
+
+    left, right = st.columns(2)
+    with left:
+        st.markdown("**Synthetic user state**")
+        user_plot = users[["V", "A", "S"]].rename(
+            columns={"V": "Basket value", "A": "Activity", "S": "Price sensitivity"}
+        )
+        st.scatter_chart(
+            user_plot,
+            x="Basket value",
+            y="Activity",
+            color="Price sensitivity",
+            size=10,
+        )
+    with right:
+        st.markdown("**Purchase-funnel structure**")
+        funnel = parameters["funnel"]
+        funnel_frame = pd.DataFrame({
+            "Stage": ["View → click", "Click → cart", "Cart → purchase"],
+            "Probability": [funnel["p1"], funnel["p2"], funnel["p3"]],
+        })
+        st.bar_chart(funnel_frame, x="Stage", y="Probability", horizontal=True)
+
+    st.markdown("**Candidate coupon catalog**")
+    environment_for_catalog = CouponBanditEnvironment(users, parameters, seed=settings["seed"])
+    catalog_rows = []
+    for action in environment_for_catalog.actions:
+        metadata = environment_for_catalog.action_metadata(action)
+        catalog_rows.append({
+            "Action": display_action(action, environment_for_catalog),
+            "Face value": metadata["coupon_value"],
+            "Free coupon": bool(metadata["free"]),
+            "Expanded value": bool(metadata["expand"]),
+            "Modelled basket uplift": metadata["uplift"],
+        })
+    st.dataframe(pd.DataFrame(catalog_rows), hide_index=True, width="stretch")
 
 with learning_tab:
     st.subheader("Expected reward and regret")
@@ -185,8 +255,33 @@ with actions_tab:
         hide_index=True,
         width="stretch",
     )
+    st.subheader("Decision mix by user segment")
+    decision_users = history.merge(users[["user_id", "segment"]], on="user_id", how="left")
+    segment_mix = pd.crosstab(decision_users["segment"], decision_users["Action"])
+    st.bar_chart(segment_mix)
+
+    st.subheader("Business-readable decision explanations")
+    st.caption(
+        "The historical prototype used an optional LLM to paraphrase model output. The maintained "
+        "page generates explanations directly from displayed values so they are reproducible and "
+        "cannot add unsupported business claims."
+    )
+    recent = history.tail(3)
+    indexed_users = users.set_index("user_id")
+    for _, row in recent.iterrows():
+        with st.expander(f"Update {int(row['step'])}: {row['Action']}"):
+            st.write(explain_decision(row, indexed_users.loc[row["user_id"]], environment))
 
 with assumptions_tab:
+    st.subheader("How the project evolved")
+    st.markdown(
+        """
+1. **Competition prototype:** filtered the afternoon-tea scene, fitted user-state distributions, constructed a purchase funnel, and compared coupon strategies under a subsidy budget.
+2. **Reproducibility pass:** removed private inputs from Git, added deterministic synthetic files, clarified the simulation boundary, and introduced automated tests.
+3. **Learning-method correction:** separated the old full-information allocator from a real partial-feedback policy, then implemented shared LinUCB with context-action interactions.
+4. **Public presentation pass:** consolidated duplicate reports into one English technical report and rebuilt the dashboard around the maintained method and inspectable evidence.
+        """
+    )
     st.subheader("Evidence boundary")
     st.markdown(
         """

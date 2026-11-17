@@ -1,12 +1,12 @@
-# Final Technical Report
+# Final Technical Report — Meituan T15 Coupon Strategy Project
 
 ## Executive summary
 
-The maintained version replaces the original full-information, iterative allocation demonstration with a genuine sequential contextual-bandit experiment. A shared LinUCB policy now selects one coupon action, receives only that action's stochastic feedback, and updates online while respecting a remaining budget.
+This report documents the current technical version of a student project developed for the Meituan T15 business-data-science competition. The broader project covers afternoon-tea scene extraction, semi-synthetic user generation, funnel simulation, coupon-response modelling, and budget-aware strategy evaluation. Its current allocation layer uses shared LinUCB: the policy selects one action, receives only that action's stochastic feedback, and updates online while respecting remaining budget.
 
 In the fixed reference scenario, the learned policy reached an expected incremental net reward of 1.2111–1.2146 in the final 1,000-update window across three seeds. The best fixed action scored 1.0688 and the contextual oracle scored 1.2560. The learned policy therefore captured about 96% of the simulator oracle and exceeded the best fixed action by about 13% inside this semi-synthetic environment.
 
-These are technical experiment results, not observed Meituan revenue lift.
+These are technical results for the project's declared simulator, not observed Meituan revenue lift or an official Meituan system evaluation.
 
 ## 1. Decision problem
 
@@ -65,7 +65,7 @@ The population generator uses seed 42. Policy seeds are 0, 1, and 2. All policie
 
 The mean final-window reward is 1.2131, with a standard deviation of 0.0018 across seeds. Relative to the best fixed action, it is about 13.5% higher. Mean oracle capture is 96.12%, and mean regret falls by 90.00% from the first to the final reporting window. The remaining gap to the contextual oracle is roughly 0.05 reward units per update.
 
-## 5. What changed technically
+## 5. Project evolution and technical changes
 
 | Earlier version | Maintained version | Effect |
 | --- | --- | --- |
@@ -75,7 +75,9 @@ The mean final-window reward is 1.2131, with a standard deviation of 0.0018 acro
 | Noisy single simulated outcome | Batched feedback over 16 exposures | Lowers reward variance while retaining partial feedback |
 | Reward dominated by natural spender value | Incremental-net reward with a no-coupon control variate | Better aligns learning with subsidy value |
 | Raw rare-coupon group means | Reliability shrinkage toward an amount prior | Reduces small-sample instability |
-| Historical multi-page report UI | One English experiment dashboard and one final report | Makes the maintained method and evidence boundary unambiguous |
+| Historical multi-page report UI | One English project dashboard and one final report | Connects the business problem, model structure, current method, and evidence boundary |
+
+The redesigned dashboard restores the strongest ideas from the historical presentation without restoring stale artifacts: it visualizes user state, funnel calibration, the coupon catalog, policy learning, segment-level action mix, and budget use. The earlier optional LLM explainer is represented by deterministic business-readable explanations tied directly to displayed values; this avoids sending records to an external service or allowing generated prose to overstate model evidence.
 
 ## 6. Validation
 
