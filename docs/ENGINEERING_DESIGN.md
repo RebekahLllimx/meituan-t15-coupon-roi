@@ -92,6 +92,22 @@ The same-budget uniform baselines are intentional: comparing a constrained
 policy with an unconstrained full-population policy would confound policy quality
 with budget and exposure differences.
 
+### Sequential contextual-bandit experiment
+
+`contextual_bandit.py` is deliberately separate from the full-information
+allocator. It implements disjoint LinUCB with one ridge-regression model for each
+coupon action. At each step it receives a normalized context containing user
+value, activity, and posterior sensitivity; selects one feasible action; observes
+only that action's stochastic purchase, GTV, and coupon cost; and updates only
+the selected action model.
+
+The environment and learner have separate responsibilities. The environment may
+compute expected rewards for evaluation and oracle regret, but those values are
+not passed to the policy update. Budget feasibility is checked before selection,
+and realized coupon cost is deducted only after a simulated purchase. This is a
+real partial-feedback contextual-bandit loop evaluated in simulation, not a
+claim that the competition tables contain logged online-bandit feedback.
+
 ## 5. Testing and validation
 
 The public suite uses deterministic invented spreadsheets. It checks:
@@ -103,6 +119,8 @@ The public suite uses deterministic invented spreadsheets. It checks:
 - progress reporting without importing Streamlit;
 - rejection of malformed optimizer inputs;
 - cache identifier validation against path traversal.
+- partial-feedback LinUCB updates, seeded stochastic outcomes, budget safety,
+  and non-negative expected regret.
 
 The suite does not prove that the behavioral assumptions hold in production.
 Sensitivity analysis and Monte Carlo runs inspect model behavior; a randomized
@@ -125,7 +143,9 @@ artifacts. Only artifacts created by the local application may be loaded.
 - The population and outcomes are semi-synthetic; reported ROI and GTV values
   are scenarios rather than observed gains.
 - Repeated UCB-style rounds do not consume live feedback. A real online-learning
-  extension would need a separate environment or deployed observation stream.
+  production extension would need a deployed observation stream. The separate
+  LinUCB experiment now supplies a valid simulated learning loop, but does not
+  remove this production-data limitation.
 - The historical metric key should eventually be migrated to a neutral name
   across reports and visualizations, with a versioned result schema.
 - `app.py` still performs substantial orchestration. A future application service

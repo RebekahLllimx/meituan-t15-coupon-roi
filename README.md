@@ -14,6 +14,8 @@ This repository is a **modeling and decision-support demonstration**. Its increm
 4. The [optimizer](optimization.py) scores coupon choices with an uncertainty bonus and allocates them greedily subject to a budget and a per-coupon coverage cap. Repeated rounds use model-implied belief updates, so the method is described as iterative UCB-style allocation rather than an online bandit.
 5. The [Streamlit app](app.py) presents user generation, calibration, simulation, allocation, and sensitivity views. The [report pipeline](run_full_report_pipeline.py) runs the same research workflow for exported analyses.
 
+The repository also contains a separate [sequential contextual-bandit experiment](contextual_bandit.py). A disjoint LinUCB policy observes only the stochastic reward of the coupon it selected, updates that action's model, respects a remaining coupon budget, and records expected regret against the simulator oracle. This is genuine partial-feedback bandit learning inside a semi-synthetic environment; it is not evidence of online performance at Meituan.
+
 The [engineering design document](docs/ENGINEERING_DESIGN.md) explains the system boundary, interfaces, tests, security decisions, and limitations. The [method and formula guide](docs/README.md) links to the original detailed documentation, currently in Chinese.
 
 ## Required input data
@@ -40,6 +42,7 @@ source .venv/bin/activate
 python -m pip install -r requirements.txt
 python generate_synthetic_demo.py  # omit when using authorized inputs
 python -m unittest discover -s tests -v
+python run_bandit_demo.py --steps 500 --budget 3000 --seed 42
 streamlit run app.py
 ```
 

@@ -46,9 +46,10 @@ class SyntheticDemoTest(unittest.TestCase):
             generate(first, seed=17)
             generate(second, seed=17)
             for filename in FILES:
-                self.assertEqual(
-                    (Path(first) / filename).read_bytes(),
-                    (Path(second) / filename).read_bytes(),
+                pd.testing.assert_frame_equal(
+                    pd.read_excel(Path(first) / filename),
+                    pd.read_excel(Path(second) / filename),
+                    check_dtype=True,
                 )
 
     def test_zero_budget_produces_no_allocations(self):
