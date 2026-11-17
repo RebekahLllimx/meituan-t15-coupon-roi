@@ -2,7 +2,7 @@
 
 ## 1. Problem and requirements
 
-This student competition project asks how afternoon-tea coupons can be simulated, compared, and allocated across heterogeneous users while respecting a campaign budget. Contextual learning is the current allocation method inside the broader Meituan T15 project. The application is a research and decision-support prototype rather than a production promotion service.
+This competition project asks how afternoon-tea coupons can be modelled, compared, and allocated across heterogeneous users while respecting a campaign budget. Contextual learning is the allocation method inside the broader Meituan T15 workflow, which also covers scene extraction, user-state construction, funnel calibration, evaluation, and presentation.
 
 ### Functional requirements
 
@@ -49,7 +49,9 @@ Synthetic fixture / authorized local spreadsheets
           Streamlit UI        benchmark CLI
 ```
 
-`feature_engineering.py` is the input adapter. `simulation_engine.py` owns outcome assumptions. `contextual_bandit.py` owns the environment-policy boundary and learning loop. `app.py` presents the competition problem, data calibration, model structure, policy results, decision explanations, and project evolution, but contains no policy logic. The command-line scripts provide small and full benchmark entry points.
+`feature_engineering.py` is the input adapter. `simulation_engine.py` owns outcome assumptions. `contextual_bandit.py` owns the environment-policy boundary and learning loop. `project_pipeline.py` composes these modules and is the project-level path used by the dashboard, CLI, benchmark, and integration tests. `app.py` presents the competition problem, data calibration, model structure, policy results, decision explanations, and project evolution, but contains no policy logic.
+
+The separation between simulator and bandit is an architectural boundary, not a split between two projects. The simulator exposes expected and stochastic action outcomes; the bandit consumes that interface; the project pipeline owns their lifecycle and shared configuration.
 
 ## 3. Interfaces and data design
 
@@ -98,22 +100,20 @@ The test suite checks:
 - the incremental inverse against a direct matrix inverse;
 - seeded stochastic reproducibility;
 - non-negative expected regret and budget safety;
-- invalid configuration and malformed population rejection.
+- invalid configuration and malformed population rejection;
+- the complete public pipeline from generated spreadsheets to decisions and summary metrics.
 
-The benchmark compares random action, best fixed action, contextual oracle, and learned shared LinUCB under one environment and protocol. This validates code behavior inside the simulator; it does not validate the behavioral assumptions against production traffic.
+The benchmark compares random action, best fixed action, contextual oracle, and learned shared LinUCB under one environment and protocol. It holds the campaign population fixed across policy seeds so that variation reflects the learning process rather than regenerated users.
 
 ## 6. Deployment and operations
 
-The project is intentionally a local competition and research application. Installation is defined by `requirements.txt`; tests run in GitHub Actions; Streamlit provides the demonstration page. No database, microservice, external LLM, or cloud deployment is added without an operational requirement. The former LLM strategy explainer was replaced by deterministic explanations derived from displayed inputs and metrics, preserving the useful business-translation layer without transmitting records or inventing reasons.
+Installation is defined by `requirements.txt`; tests run in GitHub Actions; Streamlit provides the interactive application. The current single-process architecture matches the experiment's data size and execution model. A database, model registry, API service, and distributed workers become useful only when decisions, models, and outcomes must persist across users or machines. Decision explanations are derived from displayed inputs and metrics, keeping the business-translation layer consistent with the calculation.
 
 Raw data, exports, logs, virtual environments, and editor artifacts are excluded by `.gitignore`. The public demo generates its own temporary input files and deletes them after feature construction.
 
-## 7. Limitations and next steps
+## 7. Evaluation boundary and next steps
 
-- Public results are semi-synthetic and are not evidence of campaign lift.
-- The simulator oracle is available only for evaluation; a production system cannot query it.
-- Source tables lack randomized assignments and logging propensities, so they cannot support unbiased offline policy evaluation.
-- Production use would require controlled exploration, propensity logging, delayed-outcome handling, safety constraints, drift monitoring, and IPS or doubly robust evaluation.
-- A feature/schema version should be introduced before stored models or cross-version result comparison are supported.
-
-The current design favors a narrow, testable learning system over decorative microservices or unsupported scalability claims.
+- The public benchmark measures the declared semi-synthetic campaign environment; the simulator oracle is used only as an evaluation reference.
+- The source tables lack randomized assignments and logging propensities. Live evaluation therefore requires controlled exploration and propensity-aware analysis.
+- Delayed outcomes, campaign eligibility, budget pacing, safety constraints, and model drift should be added with a production event log.
+- Feature and schema versions should accompany stored models and cross-version result comparison.
