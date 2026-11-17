@@ -32,6 +32,21 @@ class SyntheticDemoTest(unittest.TestCase):
                 budget=100, epochs=1, show_progress=False
             )
             self.assertIn("allocation", result)
+            selected = result["allocation_df"]
+            self.assertLessEqual(float(selected["cost"].sum()), 100.0 + 1e-9)
+            self.assertEqual(selected["user_id"].nunique(), len(selected))
+            cap = max(1, int(len(users) * result["constraints"]["coupon_cap_share"]))
+            self.assertTrue(all(count <= cap for count in result["coupon_usage"].values()))
+
+    def test_generator_is_deterministic_for_the_same_seed(self):
+        with tempfile.TemporaryDirectory() as first, tempfile.TemporaryDirectory() as second:
+            generate(first, seed=17)
+            generate(second, seed=17)
+            for filename in FILES:
+                self.assertEqual(
+                    (Path(first) / filename).read_bytes(),
+                    (Path(second) / filename).read_bytes(),
+                )
 
 
 if __name__ == "__main__":
