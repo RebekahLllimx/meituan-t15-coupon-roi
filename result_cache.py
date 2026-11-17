@@ -3,6 +3,7 @@ import os
 import pickle
 import time
 import hashlib
+import re
 from dataclasses import dataclass, asdict
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -46,6 +47,8 @@ class ResultCache:
         _ensure_dir(self.artifact_dir)
 
     def _paths(self, run_id: str) -> Tuple[str, str]:
+        if not re.fullmatch(r"[A-Za-z0-9_.-]+", str(run_id)):
+            raise ValueError("run_id contains unsupported characters")
         return (
             os.path.join(self.meta_dir, f"{run_id}.json"),
             os.path.join(self.artifact_dir, f"{run_id}.pkl"),
@@ -98,6 +101,12 @@ class ResultCache:
         return metas[: max(1, int(limit))]
 
     def load(self, run_id: str) -> Tuple[CacheMeta, Dict[str, Any]]:
+        """Load an artifact produced by this application.
+
+        Artifacts use pickle for local DataFrame support. Never copy an
+        untrusted artifact into the cache directory: pickle is not a safe
+        interchange format.
+        """
         meta_path, artifact_path = self._paths(run_id)
         with open(meta_path, "r", encoding="utf-8") as f:
             meta = CacheMeta(**json.load(f))

@@ -1,38 +1,37 @@
 import copy
+from dataclasses import dataclass
+from typing import Callable, Optional
 
 import numpy as np
 import pandas as pd
-try:
-    import streamlit as st
-except Exception:
-    class _DummyProgress:
-        def progress(self, *args, **kwargs):
-            return None
-
-        def empty(self):
-            return None
-
-    class _DummyStatus:
-        def text(self, *args, **kwargs):
-            return None
-
-        def empty(self):
-            return None
-
-    class _DummyStreamlit:
-        def progress(self, *args, **kwargs):
-            return _DummyProgress()
-
-        def empty(self):
-            return _DummyStatus()
-
-    st = _DummyStreamlit()
 
 from simulation_engine import SimulationEngine
 
 
+@dataclass(frozen=True)
+class ProgressEvent:
+    """Framework-neutral progress message emitted by long-running operations."""
+
+    stage: str
+    completed: int
+    total: int
+    message: str
+
+    @property
+    def fraction(self):
+        return 1.0 if self.total <= 0 else min(1.0, self.completed / self.total)
+
+
 class Optimization:
-    def __init__(self, user_features, global_params, order_df=None, coupon_cap_share=0.35, alpha_ucb=0.25):
+    def __init__(
+        self,
+        user_features,
+        global_params,
+        order_df=None,
+        coupon_cap_share=0.35,
+        alpha_ucb=0.25,
+        progress_callback: Optional[Callable[[ProgressEvent], None]] = None,
+    ):
         self.base_user_features = user_features.copy()
         self.user_features = user_features.copy()
         self.global_params = global_params
@@ -41,6 +40,30 @@ class Optimization:
         self.candidate_coupons = list(global_params.get('candidate_coupons', []))
         self.coupon_cap_share = coupon_cap_share
         self.alpha_ucb = alpha_ucb
+        self.progress_callback = progress_callback
+        self._validate_configuration()
+
+    def _validate_configuration(self):
+        """Reject invalid constraints before an allocation run starts."""
+        required_columns = {
+            'user_id', 'V', 'A', 'S_alpha_post', 'S_beta_post',
+            'exposure', 'successes', 'failures'
+        }
+        missing = required_columns.difference(self.user_features.columns)
+        if missing:
+            raise ValueError(f"user_features is missing required columns: {sorted(missing)}")
+        if self.user_features['user_id'].duplicated().any():
+            raise ValueError("user_id values must be unique")
+        if not 0 < float(self.coupon_cap_share) <= 1:
+            raise ValueError("coupon_cap_share must be in (0, 1]")
+        if float(self.alpha_ucb) < 0:
+            raise ValueError("alpha_ucb must be non-negative")
+        if not self.candidate_coupons:
+            raise ValueError("global_params must define at least one candidate coupon")
+
+    def _report_progress(self, stage, completed, total, message):
+        if self.progress_callback is not None:
+            self.progress_callback(ProgressEvent(stage, completed, total, message))
 
     def reset_state(self):
         self.user_features = self.base_user_features.copy()
@@ -60,11 +83,8 @@ class Optimization:
         metrics = {}
         total_tasks = len(self.user_features) * len(self.candidate_coupons)
         done = 0
-        progress = st.progress(0.0) if show_progress else None
-        status = st.empty() if show_progress else None
-
         if show_progress:
-            status.text("正在预计算用户-券组合的 Funnel 因果增量...")
+            self._report_progress("precompute", 0, total_tasks, "Precomputing user-coupon outcomes")
 
         for row in self.user_features.itertuples():
             user_id = row.user_id
@@ -91,14 +111,12 @@ class Optimization:
                 }
                 done += 1
                 if show_progress and total_tasks > 0 and (done % max(1, total_tasks // 25) == 0 or done == total_tasks):
-                    progress.progress(done / total_tasks)
-                    status.text(f"预计算中... {int(done / total_tasks * 100)}%")
+                    self._report_progress("precompute", done, total_tasks, "Precomputing user-coupon outcomes")
 
             metrics[user_id] = user_metrics
 
         if show_progress:
-            progress.empty()
-            status.text("预计算完成")
+            self._report_progress("precompute", total_tasks, total_tasks, "Precomputation complete")
         return metrics
 
     def _greedy_allocate(self, budget, metrics, use_ucb=True):
@@ -148,7 +166,13 @@ class Optimization:
 
         return allocation, pd.DataFrame(selected_rows), coupon_usage
 
-    def _update_bandit_state(self, allocation_df):
+    def _update_simulated_beliefs(self, allocation_df):
+        """Update synthetic sensitivity beliefs from model-implied responses.
+
+        This is not an online bandit update: no observed production reward enters
+        this method.  The explicit name prevents simulated iteration from being
+        mistaken for evidence learned from deployed decisions.
+        """
         if allocation_df is None or len(allocation_df) == 0:
             return
 
@@ -214,7 +238,12 @@ class Optimization:
             remaining_budget -= row.cost
         return allocation
 
-    def run_bandit_epochs(self, budget, epochs=3, show_progress=True):
+    def run_iterative_ucb_allocation(self, budget, epochs=3, show_progress=True):
+        """Repeat UCB-style ranking with model-implied belief updates."""
+        if float(budget) < 0:
+            raise ValueError("budget must be non-negative")
+        if int(epochs) < 1:
+            raise ValueError("epochs must be at least 1")
         history = []
         final_metrics = None
         final_allocation = None
@@ -222,13 +251,11 @@ class Optimization:
         final_precomputed = None
         final_usage = None
 
-        epoch_bar = st.progress(0.0) if show_progress else None
-        epoch_text = st.empty() if show_progress else None
-
         for epoch in range(epochs):
             if show_progress:
-                epoch_bar.progress((epoch + 1) / epochs)
-                epoch_text.text(f"Bandit训练轮次 {epoch + 1}/{epochs}")
+                self._report_progress(
+                    "allocation", epoch, epochs, f"Running allocation round {epoch + 1}/{epochs}"
+                )
 
             precomputed = self.precompute_metrics(show_progress=False)
             allocation, selected_df, coupon_usage = self._greedy_allocate(budget, precomputed, use_ucb=True)
@@ -240,7 +267,7 @@ class Optimization:
                 'total_cost': metrics['total_cost'],
                 'covered_users': int((pd.Series(allocation).notna()).sum())
             })
-            self._update_bandit_state(selected_df)
+            self._update_simulated_beliefs(selected_df)
             final_metrics = metrics
             final_allocation = allocation
             final_selected = selected_df
@@ -248,8 +275,7 @@ class Optimization:
             final_usage = coupon_usage
 
         if show_progress:
-            epoch_bar.empty()
-            epoch_text.text("Bandit训练完成")
+            self._report_progress("allocation", epochs, epochs, "Allocation rounds complete")
 
         return {
             'allocation': final_allocation,
@@ -263,7 +289,7 @@ class Optimization:
 
     def optimize(self, budget, epochs=3, show_progress=True):
         self.reset_state()
-        result = self.run_bandit_epochs(budget, epochs=epochs, show_progress=show_progress)
+        result = self.run_iterative_ucb_allocation(budget, epochs=epochs, show_progress=show_progress)
         allocation = result['allocation']
         optimized_metrics = result['optimized_metrics']
         selected_df = result['selected_df'].copy()
@@ -278,7 +304,7 @@ class Optimization:
             alloc_gtv = self._uniform_budget_allocation(precomputed, budget=float(budget), coupon=coupon, rank_by='value')
             strategies[f'统一发{coupon}(同预算ROI)'] = self.simulation_engine.calculate_expected_metrics(alloc_roi)
             strategies[f'统一发{coupon}(同预算GTV)'] = self.simulation_engine.calculate_expected_metrics(alloc_gtv)
-        strategies['Bandit优化'] = optimized_metrics
+        strategies['迭代UCB分配'] = optimized_metrics
 
         return {
             'allocation': allocation,

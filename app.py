@@ -7,7 +7,7 @@ import streamlit as st
 
 from feature_engineering import FeatureEngineering
 from llm_explainer import StrategyExplainer
-from optimization import Optimization
+from optimization import Optimization, ProgressEvent
 from simulation_engine import SimulationEngine
 from visualization import Visualization
 from result_cache import ResultCache
@@ -16,6 +16,22 @@ from result_cache import ResultCache
 viz = Visualization()
 explainer = StrategyExplainer()
 cache = ResultCache()
+
+
+class StreamlitProgress:
+    """Render domain-layer progress events without coupling it to Streamlit."""
+
+    def __init__(self):
+        self._bar = st.progress(0.0)
+        self._message = st.empty()
+
+    def __call__(self, event: ProgressEvent):
+        self._bar.progress(event.fraction)
+        self._message.text(event.message)
+
+    def close(self):
+        self._bar.empty()
+        self._message.empty()
 
 
 def _init_state():
@@ -28,7 +44,7 @@ def _init_state():
             st.session_state[key] = None
 
 
-def _monthly_business_impact_text(bandit_metrics, unified_metrics, daily_coupons=10000, days=30):
+def _monthly_business_impact_text(ucb_metrics, unified_metrics, daily_coupons=10000, days=30):
     """
     Convert strategy-level metrics into a business-friendly monthly impact sentence.
     IMPORTANT: scale by "expected coupon orders" (orders_with_coupon), NOT by covered_users.
@@ -40,26 +56,26 @@ def _monthly_business_impact_text(bandit_metrics, unified_metrics, daily_coupons
         except Exception:
             return 0.0
 
-    bandit_cost = _safe(bandit_metrics.get("total_cost", 0.0))
-    bandit_gtv = _safe(bandit_metrics.get("delta_gtv_causal", 0.0))
-    bandit_orders_with_coupon = max(1.0, _safe(bandit_metrics.get("orders_with_coupon", 0.0)))
+    ucb_cost = _safe(ucb_metrics.get("total_cost", 0.0))
+    ucb_gtv = _safe(ucb_metrics.get("delta_gtv_causal", 0.0))
+    ucb_orders_with_coupon = max(1.0, _safe(ucb_metrics.get("orders_with_coupon", 0.0)))
     uni_cost = _safe(unified_metrics.get("total_cost", 0.0))
     uni_gtv = _safe(unified_metrics.get("delta_gtv_causal", 0.0))
     uni_orders_with_coupon = max(1.0, _safe(unified_metrics.get("orders_with_coupon", 0.0)))
 
     # per-coupon-order average cost/gtv, then scale to assumed coupon volume
-    bandit_cost_per = bandit_cost / bandit_orders_with_coupon
-    bandit_gtv_per = bandit_gtv / bandit_orders_with_coupon
+    ucb_cost_per = ucb_cost / ucb_orders_with_coupon
+    ucb_gtv_per = ucb_gtv / ucb_orders_with_coupon
     uni_cost_per = uni_cost / uni_orders_with_coupon
     uni_gtv_per = uni_gtv / uni_orders_with_coupon
 
-    monthly_cost_bandit = bandit_cost_per * daily_coupons * days
-    monthly_gtv_bandit = bandit_gtv_per * daily_coupons * days
+    monthly_cost_ucb = ucb_cost_per * daily_coupons * days
+    monthly_gtv_ucb = ucb_gtv_per * daily_coupons * days
     monthly_cost_uni = uni_cost_per * daily_coupons * days
     monthly_gtv_uni = uni_gtv_per * daily_coupons * days
 
-    saved_cost = monthly_cost_uni - monthly_cost_bandit
-    extra_gtv = monthly_gtv_bandit - monthly_gtv_uni
+    saved_cost = monthly_cost_uni - monthly_cost_ucb
+    extra_gtv = monthly_gtv_ucb - monthly_gtv_uni
     # 单位换成“万元”
     saved_cost_wan = saved_cost / 10000.0
     extra_gtv_wan = extra_gtv / 10000.0
@@ -555,7 +571,7 @@ if st.session_state['user_features'] is not None and st.session_state['global_pa
     sim_seed = st.number_input('仿真随机种子', min_value=1, value=2026, step=1)
     mc_runs = st.slider('Monte Carlo 轮数', min_value=20, max_value=120, value=50, step=10)
     if selected_coupon == '不发券':
-        st.info('当前选择的是“不发券”基线策略，因此期望因果增量、分组转化增量和 Monte Carlo 增量分布接近 0 属于正常现象。')
+        st.info('当前选择的是“不发券”基线策略，因此模型调整增量、分组转化增量和 Monte Carlo 增量分布接近 0 属于正常现象。')
 
     if st.button('运行 Funnel 仿真'):
         coupon_value = None if selected_coupon == '不发券' else selected_coupon
@@ -586,9 +602,9 @@ if st.session_state['user_features'] is not None and st.session_state['global_pa
         expected_metrics = sim_result['expected_metrics']
         simulated_metrics = sim_result['simulated_metrics']
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric('解析因果增量GTV', f"{expected_metrics['delta_gtv_causal']:.2f}")
+        c1.metric('解析模型增量 GTV', f"{expected_metrics['delta_gtv_causal']:.2f}")
         c2.metric('解析 ROI', f"{expected_metrics['roi']:.2f}")
-        c3.metric('随机因果增量GTV', f"{simulated_metrics['delta_gtv_causal']:.2f}")
+        c3.metric('随机模型增量 GTV', f"{simulated_metrics['delta_gtv_causal']:.2f}")
         c4.metric('随机 ROI', f"{simulated_metrics['roi']:.2f}")
         st.pyplot(viz.plot_simulation_comparison(expected_metrics, simulated_metrics))
         st.pyplot(viz.plot_segment_lift(sim_result['segment_lift_df']))
@@ -604,7 +620,7 @@ if st.session_state['user_features'] is not None and st.session_state['global_pa
         st.caption("说明：beta 基于 p3_base 计算；发券后 p3_coupon 会上升，因此 beta 与 p1*p2*p3_coupon 不应直接对齐。")
 
 if st.session_state['user_features'] is not None and st.session_state['global_params'] is not None:
-    st.header('Step 4. Bandit 优化与业务解释')
+    st.header('Step 4. 迭代 UCB 分配与业务解释')
     user_features = st.session_state['user_features']
     global_params = st.session_state['global_params']
     fe = st.session_state['feature_engineering']
@@ -612,19 +628,24 @@ if st.session_state['user_features'] is not None and st.session_state['global_pa
     control1, control2, control3 = st.columns(3)
     budget = control1.number_input('总预算', min_value=100, value=3000, step=100)
     coupon_cap_share = control2.slider('单券型覆盖上限', min_value=0.10, max_value=0.80, value=0.35, step=0.05)
-    alpha_ucb = control3.slider('Bandit探索强度 α', min_value=0.0, max_value=2.0, value=0.25, step=0.05)
-    epochs = st.slider('Bandit训练轮次', min_value=1, max_value=10, value=3, step=1)
+    alpha_ucb = control3.slider('UCB 不确定性权重 α', min_value=0.0, max_value=2.0, value=0.25, step=0.05)
+    epochs = st.slider('模拟信念更新轮次', min_value=1, max_value=10, value=3, step=1)
 
     if st.button('求解最优策略'):
+        progress = StreamlitProgress()
         opt = Optimization(
             user_features,
             global_params,
             fe.order_df,
             coupon_cap_share=coupon_cap_share,
-            alpha_ucb=alpha_ucb
+            alpha_ucb=alpha_ucb,
+            progress_callback=progress,
         )
-        with st.spinner('正在进行 Contextual Bandit 优化...'):
-            result = opt.optimize(budget=budget, epochs=epochs, show_progress=True)
+        try:
+            with st.spinner('正在进行迭代 UCB 分配...'):
+                result = opt.optimize(budget=budget, epochs=epochs, show_progress=True)
+        finally:
+            progress.close()
         st.session_state['optimization_result'] = result
         st.session_state['llm_explanations'] = None
         # cache optimization summary + key artifacts
@@ -655,20 +676,20 @@ if st.session_state['user_features'] is not None and st.session_state['global_pa
         coverage_df = _build_coverage_df(result['final_user_pool'], result['allocation'])
 
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric('因果增量GTV', f"{optimized_metrics['delta_gtv_causal']:.2f}")
+        c1.metric('模型调整增量 GTV', f"{optimized_metrics['delta_gtv_causal']:.2f}")
         c2.metric('ROI', f"{optimized_metrics['roi']:.2f}")
         c3.metric('预算消耗', f"{optimized_metrics['total_cost']:.2f}")
         c4.metric('覆盖用户数', int((pd.Series(result['allocation']).notna()).sum()))
         st.caption(
             f"约束：单券型上限 {result['constraints']['coupon_cap_share']:.0%}，"
-            f"探索强度 α={result['constraints']['alpha_ucb']:.2f}，训练轮次={result['constraints']['epochs']}"
+            f"不确定性权重 α={result['constraints']['alpha_ucb']:.2f}，模拟更新轮次={result['constraints']['epochs']}"
         )
         st.pyplot(viz.plot_strategy_comparison(result['strategies']))
         st.pyplot(viz.plot_bandit_history(result['history']))
         st.pyplot(viz.plot_allocation_mix(result['allocation_df']))
         st.pyplot(viz.plot_coverage_by_segment(coverage_df))
 
-        # ---- Bandit vs 基线 对比表（数值，不一定可视化）----
+        # ---- UCB-style allocation vs baselines ----
         strategy_rows = []
         strategies = result.get("strategies", {})
         # 选择一个“统一发券”做对比：允许切换对照口径，避免“对照选得太强/太弱”造成误解
@@ -691,33 +712,33 @@ if st.session_state['user_features'] is not None and st.session_state['global_pa
             else:
                 unified_name, unified_metrics = max(unified_candidates.items(), key=lambda kv: float(kv[1].get("roi", 0.0)))
         baseline_metrics = strategies.get("不发券", {})
-        bandit_metrics = strategies.get("Bandit优化", result.get("optimized_metrics", {}))
+        ucb_metrics = strategies.get("迭代UCB分配", result.get("optimized_metrics", {}))
         if unified_metrics is None:
             unified_name, unified_metrics = "统一发券(无)", {"delta_gtv_causal": 0.0, "roi": 0.0, "total_cost": 0.0, "orders_with_coupon": 0.0}
 
         # covered users for bandit from allocation
-        bandit_covered_users = int((pd.Series(result["allocation"]).notna()).sum())
-        bandit_metrics = dict(bandit_metrics)
-        bandit_metrics["covered_users"] = bandit_covered_users
+        ucb_covered_users = int((pd.Series(result["allocation"]).notna()).sum())
+        ucb_metrics = dict(ucb_metrics)
+        ucb_metrics["covered_users"] = ucb_covered_users
         unified_metrics = dict(unified_metrics)
         # 商业价值换算将按 orders_with_coupon 缩放，不再强行对齐 covered_users
         baseline_metrics = dict(baseline_metrics)
         baseline_metrics["covered_users"] = 0
 
-        for name, metrics in [("基线(不发券)", baseline_metrics), (unified_name, unified_metrics), ("Bandit优化", bandit_metrics)]:
+        for name, metrics in [("基线(不发券)", baseline_metrics), (unified_name, unified_metrics), ("迭代UCB分配", ucb_metrics)]:
             strategy_rows.append({
                 "策略": name,
-                "因果增量GTV": float(metrics.get("delta_gtv_causal", 0.0)),
+                "模型调整增量GTV": float(metrics.get("delta_gtv_causal", 0.0)),
                 "ROI": float(metrics.get("roi", 0.0)),
                 "预算成本": float(metrics.get("total_cost", 0.0)),
                 "覆盖用户数": int(metrics.get("covered_users", 0)),
             })
-        st.subheader("Bandit vs 基线：数值对比表")
+        st.subheader("迭代 UCB 分配 vs 基线：数值对比表")
         st.dataframe(pd.DataFrame(strategy_rows), use_container_width=True)
 
         # ---- 商业价值换算（展示给用户，也可喂给 LLM）----
         daily_coupons = st.number_input("商业价值换算：每日发券次数", min_value=1000, value=10000, step=1000)
-        impact_text = _monthly_business_impact_text(bandit_metrics, unified_metrics, daily_coupons=int(daily_coupons), days=30)
+        impact_text = _monthly_business_impact_text(ucb_metrics, unified_metrics, daily_coupons=int(daily_coupons), days=30)
         st.info(impact_text)
 
         # ---- 拆解：每 10,000 次发券的成本与增量（用于解释“为什么是负的”）----
@@ -727,7 +748,7 @@ if st.session_state['user_features'] is not None and st.session_state['global_pa
 
         scale = int(daily_coupons)
         rows_explain = []
-        for name, m in [(unified_name, unified_metrics), ("Bandit优化", bandit_metrics)]:
+        for name, m in [(unified_name, unified_metrics), ("迭代UCB分配", ucb_metrics)]:
             cost_per = _per_coupon(m, "total_cost")
             gtv_per = _per_coupon(m, "delta_gtv_causal")
             rows_explain.append({
@@ -742,9 +763,9 @@ if st.session_state['user_features'] is not None and st.session_state['global_pa
         explain_df = pd.DataFrame(rows_explain)
         st.subheader("商业价值拆解（同口径：按发券次数）")
         st.dataframe(explain_df, use_container_width=True)
-        delta_per_coupon = float(explain_df.loc[explain_df["策略"] == "Bandit优化", "每次发券增量GTV"].values[0]) - float(explain_df.loc[explain_df["策略"] == unified_name, "每次发券增量GTV"].values[0])
+        delta_per_coupon = float(explain_df.loc[explain_df["策略"] == "迭代UCB分配", "每次发券增量GTV"].values[0]) - float(explain_df.loc[explain_df["策略"] == unified_name, "每次发券增量GTV"].values[0])
         if delta_per_coupon < 0:
-            st.warning("当前显示为负，表示在“每次发券”口径下 Bandit 的增量GTV低于统一发券。常见原因：Bandit在预算约束下更偏向控成本/提ROI，或你选择的统一券型在模型里对增量更强。可切换上方对照口径验证。")
+            st.warning("当前显示为负，表示在“每次发券”口径下，迭代 UCB 分配的模型增量低于统一发券。常见原因是预算约束更偏向 ROI，或所选统一券在当前模型中的增量更高。")
         if st.button('计算预算前沿', key='calc_budget_frontier'):
             opt_frontier = Optimization(
                 user_features,
@@ -772,7 +793,7 @@ if st.session_state['user_features'] is not None and st.session_state['global_pa
                         "impact_text": impact_text,
                         "daily_coupons": int(daily_coupons),
                         "unified_strategy": unified_name,
-                        "bandit_vs_unified_monthly": impact_text,
+                        "ucb_vs_unified_monthly": impact_text,
                     }
                     st.session_state['llm_explanations'] = explainer.explain_batch(rows, business_context=business_context)
 

@@ -2,10 +2,13 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import pandas as pd
+
 from feature_engineering import FeatureEngineering
 from generate_synthetic_demo import FILES, generate
 from optimization import Optimization
 from simulation_engine import SimulationEngine
+from result_cache import ResultCache
 
 
 class SyntheticDemoTest(unittest.TestCase):
@@ -47,6 +50,60 @@ class SyntheticDemoTest(unittest.TestCase):
                     (Path(first) / filename).read_bytes(),
                     (Path(second) / filename).read_bytes(),
                 )
+
+    def test_zero_budget_produces_no_allocations(self):
+        with tempfile.TemporaryDirectory() as directory:
+            generate(directory, seed=9)
+            features = FeatureEngineering()
+            self.assertTrue(features.load_data(directory))
+            users, parameters = features.build_features_and_params(
+                n_users=16, random_state=9, use_auto_distribution_selector=False
+            )
+            result = Optimization(users, parameters).optimize(
+                budget=0, epochs=1, show_progress=False
+            )
+            self.assertTrue(result["allocation_df"].empty)
+            self.assertEqual(result["optimized_metrics"]["total_cost"], 0.0)
+
+    def test_progress_reporting_does_not_depend_on_streamlit(self):
+        events = []
+        with tempfile.TemporaryDirectory() as directory:
+            generate(directory, seed=11)
+            features = FeatureEngineering()
+            self.assertTrue(features.load_data(directory))
+            users, parameters = features.build_features_and_params(
+                n_users=8, random_state=11, use_auto_distribution_selector=False
+            )
+            Optimization(users, parameters, progress_callback=events.append).optimize(
+                budget=25, epochs=1, show_progress=True
+            )
+        self.assertTrue(events)
+        self.assertEqual(events[-1].stage, "allocation")
+        self.assertEqual(events[-1].fraction, 1.0)
+
+    def test_optimizer_rejects_invalid_inputs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            generate(directory, seed=13)
+            features = FeatureEngineering()
+            self.assertTrue(features.load_data(directory))
+            users, parameters = features.build_features_and_params(
+                n_users=8, random_state=13, use_auto_distribution_selector=False
+            )
+
+            with self.assertRaisesRegex(ValueError, "user_id values must be unique"):
+                Optimization(pd.concat([users, users.iloc[[0]]]), parameters)
+            with self.assertRaisesRegex(ValueError, "coupon_cap_share"):
+                Optimization(users, parameters, coupon_cap_share=0)
+            with self.assertRaisesRegex(ValueError, "alpha_ucb"):
+                Optimization(users, parameters, alpha_ucb=-0.1)
+            with self.assertRaisesRegex(ValueError, "budget"):
+                Optimization(users, parameters).optimize(-1, show_progress=False)
+
+    def test_result_cache_rejects_path_traversal(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache = ResultCache(directory)
+            with self.assertRaisesRegex(ValueError, "run_id"):
+                cache.load("../../outside")
 
 
 if __name__ == "__main__":

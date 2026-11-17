@@ -10,11 +10,11 @@ This repository is a **modeling and decision-support demonstration**. Its increm
 
 1. [Feature engineering](feature_engineering.py) fits distributions for customer value (`V`), activity (`A`), and price sensitivity (`S`), then generates a semi-synthetic user pool.
 2. The [funnel simulator](simulation_engine.py) represents `view -> click -> cart -> purchase`. Coupons change the modeled purchase stage rather than all stages.
-3. The model discounts the simulated difference between coupon and no-coupon GTV by natural conversion. The code calls this quantity `delta_gtv_causal`, but it remains a **mechanism-based counterfactual estimate**, not a measured causal effect.
-4. The [optimizer](optimization.py) scores coupon choices with an uncertainty bonus and allocates them greedily subject to a budget and a per-coupon coverage cap. The policy is bandit-inspired; the repository does not demonstrate an online production experiment.
+3. The model discounts the simulated difference between coupon and no-coupon GTV by natural conversion. This is a **model-adjusted incremental GTV scenario**, not a measured causal effect. A legacy internal key is retained only for compatibility with historical reports.
+4. The [optimizer](optimization.py) scores coupon choices with an uncertainty bonus and allocates them greedily subject to a budget and a per-coupon coverage cap. Repeated rounds use model-implied belief updates, so the method is described as iterative UCB-style allocation rather than an online bandit.
 5. The [Streamlit app](app.py) presents user generation, calibration, simulation, allocation, and sensitivity views. The [report pipeline](run_full_report_pipeline.py) runs the same research workflow for exported analyses.
 
-The [method and formula guide](docs/README.md) links to more detailed documentation, currently in Chinese.
+The [engineering design document](docs/ENGINEERING_DESIGN.md) explains the system boundary, interfaces, tests, security decisions, and limitations. The [method and formula guide](docs/README.md) links to the original detailed documentation, currently in Chinese.
 
 ## Required input data
 
