@@ -95,11 +95,11 @@ with budget and exposure differences.
 ### Sequential contextual-bandit experiment
 
 `contextual_bandit.py` is deliberately separate from the full-information
-allocator. It implements disjoint LinUCB with one ridge-regression model for each
-coupon action. At each step it receives a normalized context containing user
-value, activity, and posterior sensitivity; selects one feasible action; observes
-only that action's stochastic purchase, GTV, and coupon cost; and updates only
-the selected action model.
+allocator. The maintained policy uses one shared LinUCB model over user context,
+coupon properties, and their interactions; a disjoint implementation remains as
+a diagnostic baseline. At each step the policy selects one feasible action,
+observes only that action's batched stochastic purchase, GTV, and coupon cost,
+and updates from that selected-action feedback.
 
 The environment and learner have separate responsibilities. The environment may
 compute expected rewards for evaluation and oracle regret, but those values are
@@ -118,7 +118,7 @@ The public suite uses deterministic invented spreadsheets. It checks:
 - zero-budget behavior;
 - progress reporting without importing Streamlit;
 - rejection of malformed optimizer inputs;
-- cache identifier validation against path traversal.
+- cache identifier validation against path traversal;
 - partial-feedback LinUCB updates, seeded stochastic outcomes, budget safety,
   and non-negative expected regret.
 
@@ -146,6 +146,44 @@ artifacts. Only artifacts created by the local application may be loaded.
   production extension would need a deployed observation stream. The separate
   LinUCB experiment now supplies a valid simulated learning loop, but does not
   remove this production-data limitation.
+
+### Why a contextual bandit is conditionally appropriate
+
+The competition question combines repeated user contexts, a finite action set,
+immediate coupon outcomes, and a budget. This matches contextual bandits only if
+the system can observe action–outcome feedback after deployment. The supplied
+tables do not contain a usable logging propensity and unified treatment/outcome
+record, so they cannot support unbiased offline policy evaluation. The current
+experiment is therefore a simulator study, not an offline estimate of Meituan
+policy value.
+
+The raw group-mean uplift for rare coupons was also unstable and confounded by
+user mix. Coupon uplift is now shrunk toward an amount-based prior with weight
+`n / (n + 30)`. The bandit environment adds an explicit, switchable scenario
+assumption: response is highest when coupon value as a fraction of basket value
+is near a sensitivity-dependent target. This creates a transparent personalized
+decision problem; it is not claimed as a relationship identified from the source
+tables.
+
+The maintained policy uses shared LinUCB features for user variables, coupon
+properties, and their interactions. Feedback is aggregated over 16 simulated
+exposures per update to represent batched campaign telemetry. A control variate
+subtracts action-independent no-coupon expected GTV, so the reward targets
+incremental value rather than learning which users naturally spend more.
+
+The reproducible benchmark uses 500 users, 20,000 updates, a 1,000-update
+reporting window, three seeds, `alpha=0.25`, and a 120,000 simulated budget. In
+the reviewed fixture, the best fixed action has expected incremental net reward
+1.0688 and the contextual oracle 1.2560. The three final-window LinUCB rewards
+are 1.2146, 1.2137, and 1.2111; final-window regrets are 0.0467, 0.0454, and
+0.0548. Thus the learned policy captures roughly 96% of the simulator oracle and
+exceeds the best fixed action by about 13%, within this declared scenario only.
+
+Method references: Li et al., *A Contextual-Bandit Approach to Personalized News
+Article Recommendation* (WWW 2010), and Chu et al., *Contextual Bandits with
+Linear Payoff Functions* (AISTATS 2011). Logged production evaluation would
+require propensities and methods such as IPS or doubly robust evaluation rather
+than this simulator oracle.
 - The historical metric key should eventually be migrated to a neutral name
   across reports and visualizations, with a versioned result schema.
 - `app.py` still performs substantial orchestration. A future application service

@@ -13,6 +13,8 @@ def main():
     parser.add_argument("--steps", type=int, default=500)
     parser.add_argument("--budget", type=float, default=3000.0)
     parser.add_argument("--alpha", type=float, default=0.5)
+    parser.add_argument("--cost-penalty", type=float, default=0.25)
+    parser.add_argument("--feedback-batch-size", type=int, default=16)
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
 
@@ -26,7 +28,8 @@ def main():
         )
         history = run_contextual_bandit(
             users, parameters, steps=args.steps, budget=args.budget,
-            alpha=args.alpha, seed=args.seed,
+            alpha=args.alpha, seed=args.seed, cost_penalty=args.cost_penalty,
+            feedback_batch_size=args.feedback_batch_size,
         )
 
     print(history.tail(10).to_string(index=False))

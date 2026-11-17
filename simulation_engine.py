@@ -164,6 +164,15 @@ class SimulationEngine:
         coupon_value = coupon_meta['coupon_value']
         delta = 0.0
         if coupon:
+            coupon_fit = 1.0
+            if self.global_params.get("heterogeneous_coupon_fit", False):
+                # Scenario assumption for personalization: users respond most to
+                # a coupon-to-basket ratio near a sensitivity-dependent target.
+                # This is not estimated as a causal effect from the source data.
+                actual_ratio = coupon_value / max(V, 1.0)
+                target_ratio = float(np.clip(0.06 + 0.22 * S, 0.05, 0.30))
+                fit_sigma = float(self.global_params.get("coupon_fit_sigma", 0.08))
+                coupon_fit = math.exp(-0.5 * ((actual_ratio - target_ratio) / fit_sigma) ** 2)
             delta = (
                 self.global_params.get('delta_scale', 1.0)
                 * S
@@ -171,6 +180,7 @@ class SimulationEngine:
                 * (1 - p3_base)
                 * (1 + 0.10 * coupon_meta['free'] + 0.08 * coupon_meta['expand'])
                 * coupon_meta.get('attraction', 1.0)
+                * coupon_fit
             )
         stage_response = self._apply_coupon_stage_response(
             p1=float(p1),
@@ -226,6 +236,7 @@ class SimulationEngine:
             'stage_response_mode': stage_response['stage_response_mode'],
             'causal_discount_mode': str(self.causal_discount_mode),
             'causal_discount_weight': float(causal_discount_weight),
+            'coupon_fit': float(coupon_fit if coupon else 1.0),
         }
 
     def _aggregate_user_metrics(self, user, coupon=None, stochastic=False, rng=None):

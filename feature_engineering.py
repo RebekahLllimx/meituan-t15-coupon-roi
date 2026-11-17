@@ -562,13 +562,20 @@ class FeatureEngineering:
             type_name = '免费' if coupon_type == 1 else '付费'
             expand_name = '膨胀' if expand_type == 2 else '非膨胀'
             name = f"{int(amount)}元{type_name}{expand_name}"
-            uplift = float(max(group['订单金额'].mean() - no_coupon_mean, amount * 0.35))
+            # A raw group-mean difference is highly unstable for rare coupons and
+            # is not a causal effect. Shrink it toward a transparent amount-based
+            # prior before using it as a simulation parameter.
+            prior_uplift = float(amount * 0.35)
+            empirical_uplift = float(max(group['订单金额'].mean() - no_coupon_mean, 0.0))
+            reliability = float(len(group) / (len(group) + 30.0))
+            uplift = reliability * empirical_uplift + (1.0 - reliability) * prior_uplift
             catalog[name] = {
                 'coupon_value': float(amount),
                 'free': 1.0 if coupon_type == 1 else 0.0,
                 'expand': 1.0 if expand_type == 2 else 0.0,
                 'uplift': float(np.clip(uplift, 1.0, amount * 1.25 + 4)),
                 'frequency': int(len(group)),
+                'uplift_reliability': reliability,
                 'attraction': float(1 + 0.08 * np.log1p(len(group)) + 0.02 * amount + 0.04 * (coupon_type == 1) + 0.05 * (expand_type == 2))
             }
 

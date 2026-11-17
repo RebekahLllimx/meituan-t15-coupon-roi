@@ -43,6 +43,7 @@ python -m pip install -r requirements.txt
 python generate_synthetic_demo.py  # omit when using authorized inputs
 python -m unittest discover -s tests -v
 python run_bandit_demo.py --steps 500 --budget 3000 --seed 42
+python benchmark_contextual_bandit.py  # three-seed convergence protocol
 streamlit run app.py
 ```
 

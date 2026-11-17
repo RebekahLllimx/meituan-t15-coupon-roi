@@ -1,7 +1,9 @@
 import tempfile
 import unittest
 
-from contextual_bandit import CouponBanditEnvironment, DisjointLinUCB, run_contextual_bandit
+import numpy as np
+
+from contextual_bandit import CouponBanditEnvironment, DisjointLinUCB, SharedLinUCB, run_contextual_bandit
 from feature_engineering import FeatureEngineering
 from generate_synthetic_demo import generate
 
@@ -22,10 +24,16 @@ def build_fixture(seed=21, n_users=24):
 class ContextualBanditTest(unittest.TestCase):
     def test_policy_updates_only_selected_action(self):
         policy = DisjointLinUCB([None, "5元券"], context_dim=2, alpha=0.2)
-        context = __import__("numpy").array([1.0, 0.5])
+        context = np.array([1.0, 0.5])
         policy.update(context, "5元券", reward=3.0)
         self.assertEqual(policy.observations["5元券"], 1)
         self.assertEqual(policy.observations[None], 0)
+        np.testing.assert_allclose(
+            policy._a_inverse["5元券"],
+            np.linalg.inv(policy._a["5元券"]),
+            rtol=1e-10,
+            atol=1e-10,
+        )
 
     def test_environment_is_reproducible_but_stochastic(self):
         directory, users, parameters = build_fixture()
@@ -39,6 +47,15 @@ class ContextualBanditTest(unittest.TestCase):
         finally:
             directory.cleanup()
 
+    def test_shared_policy_updates_incremental_inverse(self):
+        policy = SharedLinUCB(feature_dim=3, alpha=0.2)
+        features = np.array([1.0, -0.5, 0.25])
+        policy.update(features, reward=0.7)
+        self.assertEqual(policy.observations, 1)
+        np.testing.assert_allclose(
+            policy._a_inverse, np.linalg.inv(policy._a), rtol=1e-10, atol=1e-10
+        )
+
     def test_run_uses_partial_feedback_and_respects_budget(self):
         directory, users, parameters = build_fixture(seed=27)
         try:
@@ -49,6 +66,21 @@ class ContextualBanditTest(unittest.TestCase):
             self.assertTrue((history["remaining_budget"] >= -1e-9).all())
             self.assertLessEqual(history["cost"].sum(), 30.0 + 1e-9)
             self.assertTrue((history["expected_regret"] >= 0).all())
+        finally:
+            directory.cleanup()
+
+    def test_personalization_scenario_has_multiple_optimal_actions(self):
+        directory, users, parameters = build_fixture(seed=31, n_users=200)
+        try:
+            environment = CouponBanditEnvironment(users, parameters, seed=31)
+            optimal_actions = set()
+            for user_index in range(len(users)):
+                rewards = {
+                    action: environment.expected_reward(user_index, action)
+                    for action in environment.actions
+                }
+                optimal_actions.add(max(rewards, key=rewards.get))
+            self.assertGreater(len(optimal_actions), 1)
         finally:
             directory.cleanup()
 
