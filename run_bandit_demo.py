@@ -1,11 +1,9 @@
 """Run the sequential LinUCB experiment on deterministic public fixtures."""
 
 import argparse
-import tempfile
 
-from contextual_bandit import run_contextual_bandit
-from feature_engineering import FeatureEngineering
-from generate_synthetic_demo import generate
+from contextual_bandit import CouponBanditEnvironment
+from project_pipeline import ProjectConfig, format_action, run_project
 
 
 def main():
@@ -18,19 +16,26 @@ def main():
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
 
-    with tempfile.TemporaryDirectory() as directory:
-        generate(directory, seed=args.seed)
-        features = FeatureEngineering()
-        if not features.load_data(directory):
-            raise RuntimeError("failed to load generated fixture")
-        users, parameters = features.build_features_and_params(
-            n_users=200, random_state=args.seed, use_auto_distribution_selector=False
-        )
-        history = run_contextual_bandit(
-            users, parameters, steps=args.steps, budget=args.budget,
-            alpha=args.alpha, seed=args.seed, cost_penalty=args.cost_penalty,
-            feedback_batch_size=args.feedback_batch_size,
-        )
+    run = run_project(ProjectConfig(
+        users=200,
+        steps=args.steps,
+        budget=args.budget,
+        alpha=args.alpha,
+        cost_penalty=args.cost_penalty,
+        feedback_batch_size=args.feedback_batch_size,
+        seed=args.seed,
+    ))
+    history = run.history.copy()
+    environment = CouponBanditEnvironment(
+        run.users,
+        run.parameters,
+        seed=args.seed,
+        cost_penalty=args.cost_penalty,
+        feedback_batch_size=args.feedback_batch_size,
+    )
+    history["action"] = history["action"].map(
+        lambda action: format_action(action, environment)
+    )
 
     print(history.tail(10).to_string(index=False))
     print(f"\nTotal reward: {history.reward.sum():.2f}")

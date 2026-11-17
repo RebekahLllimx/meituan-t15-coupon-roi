@@ -1,63 +1,24 @@
-"""Interactive presentation of the maintained Meituan T15 competition project."""
+"""Interactive presentation of the Meituan T15 competition project."""
 
-import tempfile
-
-import numpy as np
 import pandas as pd
 import streamlit as st
 
-from contextual_bandit import CouponBanditEnvironment, run_contextual_bandit
-from feature_engineering import FeatureEngineering
-from generate_synthetic_demo import generate
+from contextual_bandit import CouponBanditEnvironment
+from project_pipeline import ProjectConfig, format_action, run_project
 
 
-st.set_page_config(page_title="Meituan T15 Coupon Strategy", page_icon="🎟️", layout="wide")
+st.set_page_config(page_title="Meituan T15 Coupon Strategy", layout="wide")
 
 
 @st.cache_data(show_spinner=False)
-def build_demo_population(seed: int, n_users: int):
-    """Build an invented population through the same public input adapter."""
-    with tempfile.TemporaryDirectory() as directory:
-        generate(directory, seed=seed)
-        features = FeatureEngineering()
-        if not features.load_data(directory):
-            raise RuntimeError("The synthetic fixture could not be loaded.")
-        return features.build_features_and_params(
-            n_users=n_users, random_state=seed, use_auto_distribution_selector=False
-        )
-
-
-def policy_baselines(users: pd.DataFrame, parameters: dict) -> dict:
-    """Compute simulator-only fixed-action and contextual-oracle references."""
-    environment = CouponBanditEnvironment(users, parameters, seed=0)
-    rewards = np.array([
-        [environment.expected_reward(index, action) for action in environment.actions]
-        for index in range(len(users))
-    ])
-    return {
-        "random": float(rewards.mean()),
-        "best_fixed": float(rewards.mean(axis=0).max()),
-        "oracle": float(rewards.max(axis=1).mean()),
-    }
-
-
-def display_action(action, environment: CouponBanditEnvironment) -> str:
-    """Translate raw source coupon labels into an English display label."""
-    if action is None or pd.isna(action):
-        return "No coupon"
-    metadata = environment.action_metadata(action)
-    properties = []
-    if metadata["free"]:
-        properties.append("free")
-    if metadata["expand"]:
-        properties.append("expanded-value")
-    suffix = f" ({', '.join(properties)})" if properties else ""
-    return f"CNY {metadata['coupon_value']:g} coupon{suffix}"
+def execute_project(config: ProjectConfig):
+    """Run the same project pipeline used by the command-line tools."""
+    return run_project(config)
 
 
 def explain_decision(row: pd.Series, user: pd.Series, environment: CouponBanditEnvironment) -> str:
     """Create an auditable business explanation from the values shown on screen."""
-    action_label = display_action(row["action"], environment)
+    action_label = format_action(row["action"], environment)
     sensitivity = float(user["S_alpha_post"] / (user["S_alpha_post"] + user["S_beta_post"]))
     if row["action"] is None or pd.isna(row["action"]):
         decision = "The policy kept the no-coupon action for this update"
@@ -67,22 +28,16 @@ def explain_decision(row: pd.Series, user: pd.Series, environment: CouponBanditE
         f"{decision}. The synthetic user has an expected basket value of CNY {user['V']:.1f}, "
         f"activity {user['A']:.2f}, and estimated price sensitivity {sensitivity:.2f}. "
         f"The selected action's modelled incremental net reward is {row['expected_reward']:.3f}; "
-        f"its gap to the simulator oracle is {row['expected_regret']:.3f}. The choice may include "
-        "exploration, so this explanation reports the policy inputs rather than inventing a causal reason."
+        f"its gap to the simulator oracle is {row['expected_regret']:.3f}."
     )
 
 
 st.title("Meituan T15 Afternoon-Tea Coupon Strategy")
-st.caption("A maintained student competition project for coupon simulation, personalization, and budget-aware allocation")
-st.warning(
-    "Research prototype only. All outcomes on this page are simulated under documented "
-    "assumptions; they are not production Meituan results or causal-effect estimates."
-)
 
 with st.sidebar:
     st.header("Experiment settings")
     n_users = st.slider("Synthetic users", 100, 1_000, 300, 100)
-    steps = st.slider("Learning updates", 1_000, 20_000, 10_000, 1_000)
+    steps = st.slider("Learning updates", 1_000, 20_000, 1_000, 1_000)
     feedback_batch = st.select_slider("Exposures per update", [1, 4, 8, 16, 32], value=16)
     alpha = st.slider("Exploration coefficient", 0.0, 1.0, 0.25, 0.05)
     budget = st.number_input("Simulated budget (CNY)", 1_000.0, 200_000.0, 60_000.0, 1_000.0)
@@ -91,22 +46,21 @@ with st.sidebar:
 
 if run_requested or "experiment" not in st.session_state:
     with st.spinner("Generating the population and training the policy..."):
-        users, parameters = build_demo_population(int(seed), int(n_users))
-        history = run_contextual_bandit(
-            users,
-            parameters,
-            steps=int(steps),
-            budget=float(budget),
-            alpha=float(alpha),
-            seed=int(seed),
-            policy_type="shared",
-            feedback_batch_size=int(feedback_batch),
+        run = execute_project(
+            ProjectConfig(
+                users=int(n_users),
+                steps=int(steps),
+                budget=float(budget),
+                alpha=float(alpha),
+                feedback_batch_size=int(feedback_batch),
+                seed=int(seed),
+            )
         )
         st.session_state.experiment = {
-            "users": users,
-            "parameters": parameters,
-            "history": history,
-            "baselines": policy_baselines(users, parameters),
+            "users": run.users,
+            "parameters": run.parameters,
+            "history": run.history,
+            "baselines": run.baselines,
             "settings": {
                 "users": int(n_users),
                 "steps": int(steps),
@@ -139,27 +93,26 @@ summary_columns[3].metric("Oracle captured", f"{oracle_capture:.1f}%")
 summary_columns[4].metric("Regret reduction", f"{regret_reduction:.1f}%")
 
 overview_tab, data_tab, learning_tab, actions_tab, assumptions_tab = st.tabs(
-    ["Project", "Data & model", "Policy learning", "Decisions", "Evidence & evolution"]
+    ["Project", "Data & model", "Learning", "Decisions", "Method"]
 )
 
 with overview_tab:
-    st.subheader("Competition problem")
+    st.subheader("Problem and solution")
     st.write(
-        "This project was developed for the Meituan T15 business-data-science competition. "
-        "It studies how afternoon-tea coupons can be allocated across heterogeneous users "
+        "Developed for the Meituan T15 business-data-science competition, this project "
+        "studies how afternoon-tea coupons can be allocated across heterogeneous users "
         "under a limited subsidy budget when the supplied tables do not form a complete "
         "context–treatment–outcome history."
     )
-    st.subheader("Current solution")
     st.code(
         "Synthetic spreadsheets → feature adapter → funnel simulator\n"
         "→ context-action features → LinUCB selection → partial feedback → update",
         language="text",
     )
     st.write(
-        "The original competition prototype established scene filtering, user-state modelling, "
-        "a purchase funnel, and constrained coupon comparison. The maintained version keeps "
-        "that business problem and adds a valid sequential learning loop: the policy observes "
+        "The competition entry established scene filtering, user-state modelling, "
+        "a purchase funnel, and constrained coupon comparison. The sequential layer "
+        "a sequential learning loop: the policy observes "
         "only the outcome of its selected action, shares evidence across coupon types, and "
         "checks budget feasibility before every decision."
     )
@@ -210,7 +163,7 @@ with data_tab:
     for action in environment_for_catalog.actions:
         metadata = environment_for_catalog.action_metadata(action)
         catalog_rows.append({
-            "Action": display_action(action, environment_for_catalog),
+            "Action": format_action(action, environment_for_catalog),
             "Face value": metadata["coupon_value"],
             "Free coupon": bool(metadata["free"]),
             "Expanded value": bool(metadata["expand"]),
@@ -229,15 +182,12 @@ with learning_tab:
         y_label="Incremental net reward",
     )
     st.line_chart(chart.set_index("step")[["Expected regret"]], y_label="Expected regret")
-    st.caption(
-        f"Lines are rolling means over {window:,} updates. Oracle values are used only for "
-        "evaluation and are never passed to the policy update."
-    )
+    st.write(f"Rolling window: {window:,} updates. The oracle is used only for evaluation.")
 
 with actions_tab:
     st.subheader("Selected actions and budget use")
     environment = CouponBanditEnvironment(users, parameters, seed=settings["seed"])
-    history["Action"] = history["action"].apply(lambda value: display_action(value, environment))
+    history["Action"] = history["action"].apply(lambda value: format_action(value, environment))
     st.bar_chart(history["Action"].value_counts().rename("Selections").to_frame())
     left, right = st.columns(2)
     left.metric("Realized simulated coupon cost", f"CNY {history['cost'].sum():,.2f}")
@@ -261,11 +211,6 @@ with actions_tab:
     st.bar_chart(segment_mix)
 
     st.subheader("Business-readable decision explanations")
-    st.caption(
-        "The historical prototype used an optional LLM to paraphrase model output. The maintained "
-        "page generates explanations directly from displayed values so they are reproducible and "
-        "cannot add unsupported business claims."
-    )
     recent = history.tail(3)
     indexed_users = users.set_index("user_id")
     for _, row in recent.iterrows():
@@ -273,23 +218,21 @@ with actions_tab:
             st.write(explain_decision(row, indexed_users.loc[row["user_id"]], environment))
 
 with assumptions_tab:
-    st.subheader("How the project evolved")
+    st.subheader("Development")
     st.markdown(
         """
-1. **Competition prototype:** filtered the afternoon-tea scene, fitted user-state distributions, constructed a purchase funnel, and compared coupon strategies under a subsidy budget.
-2. **Reproducibility pass:** removed private inputs from Git, added deterministic synthetic files, clarified the simulation boundary, and introduced automated tests.
-3. **Learning-method correction:** separated the old full-information allocator from a real partial-feedback policy, then implemented shared LinUCB with context-action interactions.
-4. **Public presentation pass:** consolidated duplicate reports into one English technical report and rebuilt the dashboard around the maintained method and inspectable evidence.
+1. **Competition entry:** filtered the afternoon-tea scene, modelled user state and the purchase funnel, and compared coupon strategies under a subsidy budget.
+2. **Reproducible workflow:** added deterministic public fixtures, one input-to-decision pipeline, and automated tests.
+3. **Sequential allocation:** implemented shared LinUCB with context-action interactions and selected-action feedback.
+4. **Integrated delivery:** connected the application, benchmark, figures, documentation, tests, and CI through the same execution path.
         """
     )
-    st.subheader("Evidence boundary")
+    st.subheader("Evaluation")
     st.markdown(
         """
-- The public demo uses deterministic, invented spreadsheets with the same schema as the original competition inputs.
-- Coupon outcomes come from a documented funnel simulator. The source tables do not contain randomized treatment assignments or logging propensities.
-- Personalization is an explicit scenario assumption: response varies with user value, activity, sensitivity, and coupon-to-basket fit.
-- The reward is modelled incremental net value: coupon GTV minus a coupon-cost penalty and an action-independent no-coupon baseline.
-- Reported improvement is valid only inside this semi-synthetic environment. A live deployment would require randomized exploration, propensity logging, guardrails, and offline policy evaluation.
+- Public fixtures reproduce the competition-table schema; coupon outcomes are generated by the documented funnel simulator.
+- Personalization varies with user value, activity, sensitivity, and coupon-to-basket fit.
+- Reward is incremental net value: coupon GTV minus a coupon-cost penalty and a no-coupon baseline.
+- Production evaluation would add randomized exploration, propensity logging, delayed-outcome attribution, guardrails, and offline policy evaluation.
         """
     )
-    st.info("See docs/ENGINEERING_DESIGN.md and docs/FINAL_REPORT.md for the complete method and benchmark protocol.")
