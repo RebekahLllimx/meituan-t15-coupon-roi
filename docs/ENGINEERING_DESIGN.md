@@ -51,7 +51,7 @@ Synthetic fixture / authorized local spreadsheets
 
 `feature_engineering.py` is the input adapter. `simulation_engine.py` owns outcome assumptions. `contextual_bandit.py` owns the environment-policy boundary and learning loop. `project_pipeline.py` composes these modules and is the project-level path used by the dashboard, CLI, benchmark, and integration tests. `app.py` presents the competition problem, data calibration, model structure, policy results, decision explanations, and project evolution, but contains no policy logic.
 
-The separation between simulator and bandit is an architectural boundary, not a split between two projects. The simulator exposes expected and stochastic action outcomes; the bandit consumes that interface; the project pipeline owns their lifecycle and shared configuration.
+The simulator exposes expected and stochastic action outcomes to the bandit. The project pipeline manages both modules and their shared configuration.
 
 ## 3. Interfaces and data design
 

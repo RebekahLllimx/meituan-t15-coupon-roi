@@ -40,6 +40,8 @@ The application covers the competition problem, source calibration, funnel and c
 
 ![Streamlit project demo](docs/assets/demo_overview.png)
 
+The screenshot shows a 1,000-update demo; the reference benchmark above uses 20,000 updates.
+
 Run it locally:
 
 ```bash

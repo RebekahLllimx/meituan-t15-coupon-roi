@@ -152,8 +152,7 @@ The standard deviation of final-window reward is 0.0018. The small spread across
 | Single simulated outcomes | Batched campaign feedback | Stabilizes the learning signal |
 | Raw outcome value dominated by natural purchasing | Incremental-net reward | Aligns training with subsidy contribution |
 | Local competition files | Deterministic public fixtures | Makes the complete workflow reproducible |
-| Multiple entry-point assembly paths | Shared `project_pipeline.py` | Keeps CLI, benchmark, tests, and UI on one architecture |
-| Competition presentation | Consolidated English dashboard and report | Presents the work as one competition solution and engineering evolution |
+| Separate entry-point assembly | Shared `project_pipeline.py` | Keeps the CLI, benchmark, tests, and application on the same execution path |
 
 ## 9. Testing and reproducibility
 
