@@ -1,8 +1,7 @@
 """Sequential contextual-bandit experiment for coupon allocation.
 
-The learner receives feedback only for the action it selected.  The environment
-is semi-synthetic and calibrated by ``SimulationEngine``; consequently this
-module demonstrates a real bandit learning loop, not production effectiveness.
+The learner receives feedback only for the action it selected. The
+semi-synthetic campaign environment is calibrated by ``SimulationEngine``.
 """
 
 import copy
