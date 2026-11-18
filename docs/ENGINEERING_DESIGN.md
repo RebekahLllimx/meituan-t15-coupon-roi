@@ -1,4 +1,4 @@
-# Engineering Design — Meituan T15 Coupon Strategy Project
+# Engineering design: Meituan T15 coupon strategy
 
 ## 1. Problem and requirements
 
@@ -20,7 +20,7 @@ This competition project asks how afternoon-tea coupons can be modelled, compare
 - explicit separation of simulator results from observed business outcomes;
 - domain code independent of Streamlit;
 - input validation, budget safety, and automated tests;
-- no credentials, private data, generated reports, or local caches in Git.
+- keep credentials, private source tables, runtime exports, and local caches out of Git; selected report figures and documentation are committed.
 
 ## 2. System architecture
 
@@ -66,17 +66,28 @@ For shared LinUCB, the feature vector combines:
 - coupon properties;
 - user-property interactions that permit personalized action response.
 
-Each `BanditStep` records only the chosen action's realized reward, cost, and purchase rate, plus expected values used for evaluation. Oracle expected rewards are never provided to the policy update.
+Each `BanditStep` records the chosen action's realized reward, cost, and purchase rate, plus expected values used for evaluation. The optimal-action oracle does not enter policy updates. The simulated no-coupon expectation separately enters the centered reward, as specified below.
+
+The programmatic entry point returns the input population, parameters, decision history, and references together:
+
+```python
+from project_pipeline import ProjectConfig, run_project
+
+run = run_project(ProjectConfig(users=40, steps=80, budget=500, seed=42))
+print(run.summary())
+```
+
+In memory, `action` is `None` or a source-catalog key. Use `format_action()` for an English display label. The history stores one row per decision, including `expected_reward`, `expected_regret`, `purchase_rate`, `cost`, and `remaining_budget`.
 
 ## 4. Implementation decisions
 
 ### Partial feedback
 
-At each update, a user is sampled, the policy scores feasible actions, and the environment returns stochastic feedback only for the selected action. The maintained shared model transfers information across coupon actions; the disjoint implementation is retained as a diagnostic baseline.
+At each update, a user is sampled, the policy scores feasible actions, and the environment returns stochastic feedback only for the selected action. The shared model transfers information across coupon actions; the disjoint implementation is retained as a diagnostic baseline.
 
 ### Incremental reward
 
-The raw selected-action reward is simulated coupon GTV minus `0.25 × coupon cost`. An action-independent expected no-coupon GTV is subtracted as a control variate. This reduces variance and focuses the learner on incremental value without revealing another coupon's realized outcome.
+The raw selected-action reward is simulated coupon GTV minus `0.25 × coupon cost`. The simulator supplies expected no-coupon GTV, which is subtracted to center the learning target. At a fixed user context this baseline is action-independent, so it does not change the true reward-maximizing action. A live campaign would need an estimated baseline.
 
 ### Numerical update
 
@@ -88,7 +99,7 @@ The source tables do not identify individual treatment effects. The simulator th
 
 ### Budget handling
 
-An action is feasible only when its face value does not exceed remaining budget. Realized coupon cost is deducted only when a simulated purchase occurs. The loop therefore cannot spend more than the supplied budget.
+An action is feasible only when its face value does not exceed remaining budget. With a feedback batch of 16, the purchase rate is the mean of 16 Bernoulli draws, and the debit is `face value × purchase rate` for that decision. Reported expenditure sums these batch-mean costs, not the raw cost of all 16 exposures. This prevents overspending under the stated accounting convention.
 
 ## 5. Testing and validation
 
@@ -107,13 +118,13 @@ The benchmark compares random action, best fixed action, contextual oracle, and 
 
 ## 6. Deployment and operations
 
-Installation is defined by `requirements.txt`; tests run in GitHub Actions; Streamlit provides the interactive application. The current single-process architecture matches the experiment's data size and execution model. A database, model registry, API service, and distributed workers become useful only when decisions, models, and outcomes must persist across users or machines. Decision explanations are derived from displayed inputs and metrics, keeping the business-translation layer consistent with the calculation.
+Install with `requirements.txt`; GitHub Actions runs the tests, and `streamlit run app.py` starts the application. Each campaign executes in one process and returns an in-memory decision history. Decision explanations use the displayed inputs and metrics.
 
 Raw data, exports, logs, virtual environments, and editor artifacts are excluded by `.gitignore`. The public demo generates its own temporary input files and deletes them after feature construction.
 
 ## 7. Evaluation boundary and next steps
 
-- The public benchmark measures the declared semi-synthetic campaign environment; the simulator oracle is used only as an evaluation reference.
+- The public benchmark measures the declared semi-synthetic campaign environment; the optimal-action oracle is used only as an evaluation reference. The environment separately supplies the expected no-coupon baseline used to center training rewards.
 - The source tables lack randomized assignments and logging propensities. Live evaluation therefore requires controlled exploration and propensity-aware analysis.
 - Delayed outcomes, campaign eligibility, budget pacing, safety constraints, and model drift should be added with a production event log.
 - Feature and schema versions should accompany stored models and cross-version result comparison.

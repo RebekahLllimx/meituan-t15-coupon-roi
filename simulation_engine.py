@@ -74,7 +74,7 @@ class SimulationEngine:
         return {
             'coupon_value': coupon_value,
             'free': 1.0 if '免费' in str(coupon) else 0.0,
-            'expand': 1.0 if '膨胀' in str(coupon) else 0.0,
+            'expand': 1.0 if '膨胀' in str(coupon) and '非膨胀' not in str(coupon) else 0.0,
             'uplift': max(1.0, coupon_value * 0.45),
             'attraction': 1.0
         }
@@ -286,7 +286,7 @@ class SimulationEngine:
                     order_no = float(rng.random() < response['prob_no_coupon'])
                     order_yes = float(rng.random() < response['prob_with_coupon'])
                     total['gtv_no_coupon'] += order_no * float(user['V'])
-                    total['gtv_with_coupon'] += order_yes * (float(user['V']) + response['uplift'])
+                    total['gtv_with_coupon'] += order_yes * (response['effective_V'] + response['uplift'])
                     total['total_cost'] += order_yes * response['coupon_value']
                     total['expected_orders_no_coupon'] += order_no
                     total['expected_orders_with_coupon'] += order_yes
@@ -298,7 +298,12 @@ class SimulationEngine:
                     total['expected_orders_with_coupon'] += response['prob_with_coupon']
 
                 total['delta_gtv'] = total['gtv_with_coupon'] - total['gtv_no_coupon']
-                total['delta_gtv_causal'] += response['delta_gtv_causal'] if not stochastic else (response['delta_gtv_causal'])
+                if stochastic:
+                    realized_delta = (order_yes * (response['effective_V'] + response['uplift'])
+                                      - order_no * float(user['V']))
+                    total['delta_gtv_causal'] += realized_delta * response['causal_discount_weight']
+                else:
+                    total['delta_gtv_causal'] += response['delta_gtv_causal']
 
         total['avg_p1'] = float(np.mean(total['avg_p1'])) if total['avg_p1'] else 0.0
         total['avg_p2'] = float(np.mean(total['avg_p2'])) if total['avg_p2'] else 0.0

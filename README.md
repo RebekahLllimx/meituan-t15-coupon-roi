@@ -17,6 +17,19 @@ The system turns three competition-style tables—user profiles, coupon orders, 
 
 The repository uses deterministic tables with the competition-data schema. Benchmark results come from the documented simulation environment.
 
+## Setup and checks
+
+Use Python 3.10 (the CI version). From the repository root:
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+python -m unittest discover -s tests -v
+```
+
+The demo and Reference benchmark generate their own input tables and need no account or API key.
+
 ## Reference result
 
 The committed benchmark uses 500 synthetic campaign users, 20,000 updates, 16 simulated exposures per update, three policy seeds, `alpha=0.25`, and a CNY 120,000 budget.
@@ -30,7 +43,7 @@ The committed benchmark uses 500 synthetic campaign users, 20,000 updates, 16 si
 | Oracle reward captured | 96.12% |
 | First-to-final regret reduction | 90.00% |
 
-Within this fixed experiment, the learned contextual policy is approximately 13.5% above the best single action and closes most of the gap to the simulator oracle.
+Within this fixed experiment, the learned contextual policy is approximately 13.5% above the best single action and captures 96.12% of oracle reward on the final-window user stream.
 
 ![Reference benchmark](docs/assets/benchmark_results.png)
 
@@ -42,13 +55,9 @@ The application covers the competition problem, source calibration, funnel and c
 
 The screenshot shows a 1,000-update demo; the reference benchmark above uses 20,000 updates.
 
-Run it locally:
+After setup, start the local application:
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-python -m pip install -r requirements.txt
-
 streamlit run app.py
 ```
 
@@ -72,18 +81,16 @@ The simulator defines the campaign environment, the bandit consumes its interfac
 
 | Decision | Rationale |
 | --- | --- |
-| Shared LinUCB with context-action interactions | Coupon actions share structure, while interaction terms allow the same coupon to behave differently for users with different basket values, activity, and price sensitivity. A disjoint implementation is retained as a diagnostic baseline. |
-| Selected-action feedback | The policy learns only from the action it issued. Oracle expectations are used for evaluation, not policy updates, so the learning loop matches the information available in a logged campaign. |
-| Incremental-net reward | Subtracting the expected no-coupon outcome focuses the model on the value added by the subsidy instead of rewarding purchases that were likely to happen without a coupon. |
+| Shared LinUCB with context-action interactions | Independent coupon models cannot use observations collected for another coupon. Sharing parameters addresses this fragmentation; user-coupon interactions retain context-dependent responses. A disjoint implementation remains available for comparison. |
+| Selected-action feedback | Only the issued action's sampled purchase outcome updates the learner; optimal-action expectations remain in evaluation. |
+| Centered incremental-net reward | The simulator supplies an expected no-coupon baseline for centering the learning target. This baseline is action-independent at a fixed user context and leaves the reward-maximizing action unchanged. |
+| Rank-one inverse updates | Sherman–Morrison updates reuse the regression matrix's inverse after each observation; numerical tests check agreement with direct inversion. |
 | Budget-aware feasibility | Coupons whose face value exceeds the remaining budget are removed before action selection; realized subsidy cost is deducted only when a purchase occurs. |
 | One orchestration path | The dashboard, command-line demo, benchmark, and integration tests call the same project pipeline, reducing the risk that the public demo and reported experiment use different logic. |
 
 ## Reproduce the workflow
 
 ```bash
-# Run all unit and end-to-end tests
-python -m unittest discover -s tests -v
-
 # Run a small complete experiment
 python run_bandit_demo.py --steps 500 --budget 3000 --seed 42
 
@@ -95,6 +102,8 @@ python build_project_assets.py
 ```
 
 `generate_synthetic_demo.py` can also write the public source-schema spreadsheets to a chosen directory. It refuses to overwrite existing files.
+
+`build_project_assets.py` replaces the committed architecture and benchmark figures.
 
 ## How the project evolved
 

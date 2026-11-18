@@ -87,7 +87,7 @@ A disjoint LinUCB implementation remains available as a diagnostic comparison. I
 
 ### 5.3 Reward and budget
 
-The maintained objective is incremental net value: simulated coupon GTV minus a coupon-cost penalty and an action-independent expected no-coupon baseline. Batched feedback over 16 exposures reduces update variance while retaining partial feedback. Before every decision, the policy excludes coupons whose face value exceeds the remaining budget; the history then records realized coupon cost and residual budget.
+The allocation objective is incremental net value: simulated coupon GTV minus a coupon-cost penalty and an action-independent expected no-coupon baseline supplied by the simulator. Each decision averages 16 Bernoulli exposures. Its budget debit is coupon face value multiplied by the resulting purchase rate, so total expenditure sums batch-mean costs. Before every decision, the policy excludes coupons whose face value exceeds the remaining budget; the history records the debit and residual budget.
 
 ## 6. Application and decision presentation
 
@@ -101,7 +101,7 @@ The Streamlit application is the interactive form of the complete competition so
 - selected-action frequencies and budget consumption;
 - segment-level action mix;
 - recent decisions explained from their displayed inputs and outputs;
-- the technical development from the competition entry to the maintained system.
+- the technical development from the competition entry to the integrated system.
 
 ![Streamlit overview](assets/demo_overview.png)
 
@@ -140,11 +140,11 @@ The user population is generated once with seed 42 and reused across policy seed
 | 1 | 1.2137 | 0.0454 | approximately 96% |
 | 2 | 1.2111 | 0.0548 | approximately 96% |
 
-The standard deviation of final-window reward is 0.0018. The small spread across seeds indicates stable convergence under the reference configuration. The remaining gap to the contextual oracle is approximately 0.05 reward units per update.
+The sample standard deviation of final-window reward across the three seeds is 0.0018. Final-window expected regret ranges from 0.0454 to 0.0548 reward units per decision under this Reference configuration.
 
 ## 8. Engineering development after the competition
 
-| Competition version | Maintained version | Project-level effect |
+| Competition version | Current implementation | Project-level effect |
 | --- | --- | --- |
 | Coupon strategies scored with full simulator access | Selected-action-only stochastic feedback | Converts allocation into a sequential learning problem |
 | Separate coupon models and direct scoring | Shared context-action representation | Learns across coupons and personalizes by user state |

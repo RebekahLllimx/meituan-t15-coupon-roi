@@ -292,7 +292,15 @@ class FeatureEngineering:
             sampled = rng.normal(center, scale, size=size)
         elif generator == 'mixture' and model == 'gmm':
             gmm = spec.get('gmm_model')
-            sampled = gmm.sample(size)[0].reshape(-1)
+            # Draw through the caller's generator. Repeated gmm.sample(1)
+            # calls with an integer random_state restart the same sequence.
+            component = rng.choice(gmm.n_components, size=size, p=gmm.weights_)
+            means = gmm.means_.reshape(-1)
+            if gmm.covariance_type == 'tied':
+                variances = np.full(gmm.n_components, float(gmm.covariances_.reshape(-1)[0]))
+            else:
+                variances = gmm.covariances_.reshape(gmm.n_components, -1)[:, 0]
+            sampled = rng.normal(means[component], np.sqrt(np.maximum(variances[component], 1e-12)))
         elif model == 'lognormal':
             params = spec['params']
             sampled = rng.lognormal(params['mu'], params['sigma'], size=size)
@@ -555,9 +563,9 @@ class FeatureEngineering:
         coupon_orders = self.scene_orders[self.scene_orders['美补金额'] > 0].copy()
         if coupon_orders.empty:
             return {
-                '3元免费非膨胀': {'coupon_value': 3.0, 'free': 1.0, 'expand': 1.0, 'uplift': 2.5, 'frequency': 1},
-                '5元免费非膨胀': {'coupon_value': 5.0, 'free': 1.0, 'expand': 1.0, 'uplift': 3.5, 'frequency': 1},
-                '8元免费非膨胀': {'coupon_value': 8.0, 'free': 1.0, 'expand': 1.0, 'uplift': 4.8, 'frequency': 1}
+                '3元免费非膨胀': {'coupon_value': 3.0, 'free': 1.0, 'expand': 0.0, 'uplift': 2.5, 'frequency': 1},
+                '5元免费非膨胀': {'coupon_value': 5.0, 'free': 1.0, 'expand': 0.0, 'uplift': 3.5, 'frequency': 1},
+                '8元免费非膨胀': {'coupon_value': 8.0, 'free': 1.0, 'expand': 0.0, 'uplift': 4.8, 'frequency': 1}
             }
 
         no_coupon_mean = float(self.scene_orders[self.scene_orders['美补金额'] <= 0]['订单金额'].mean())

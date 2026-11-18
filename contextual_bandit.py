@@ -113,7 +113,7 @@ class CouponBanditEnvironment:
             raise ValueError("users must be non-empty with unique user_id values")
         self.users = users.reset_index(drop=True).copy()
         environment_params = copy.deepcopy(global_params)
-        environment_params["heterogeneous_coupon_fit"] = True
+        environment_params.setdefault("heterogeneous_coupon_fit", True)
         environment_params.setdefault("coupon_fit_sigma", 0.08)
         self.engine = SimulationEngine(self.users, environment_params)
         self.actions = (None, *tuple(global_params.get("candidate_coupons", [])))
